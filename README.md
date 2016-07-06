@@ -2,6 +2,35 @@
 
 Scripts for processing the HI observations taken with ATCA during the MAGMO project 
 
+## This Project
+
+This code is part of an honours project being run out of the Australian 
+National University's Research School of Astronomy and Astrophysics (RSAA).
+
+In this research project I intend to analyse the composition and 
+structure of the cold and warm HI gas at the locations of the MAGMO 
+project observations (Green et al. , 2012). To enable this analysis I 
+will produce HI absorption and emission spectra from the MAGMO observations.
+
+| Author | James Dempsey |
+| Project Title | The Cold Neutral Medium As Seen By The MAGMO Project |
+| Supervisor | Naomi McClure-Griffiths |
+
+
+## MAGMO
+
+The MAGMO project was an Australia Telescope Compact Array (ATCA) observing 
+program run from 2010 to 2012 which had the aim of studying “Magnetic 
+fields of the Milky Way through OH masers” (Green et al. , 2012). It was 
+primarily concerned with measuring Zeeman splitting of hydroxyl (OH) 
+ground state spectral lines. Many of the OH masers observed by the MAGMO 
+project were associated with 6.7 GHz methanol masers. These emissions are 
+linked to high mass star formation (HMSF) regions (Minier et al. , 2003). 
+As a secondary objective, neutral hydrogen observations were taken towards 
+most of the same sources (Green et al. , 2010). As a result these HI 
+observations will be largely of HMSF regions.
+
+
 ## Directory layout
 
 - readme.md
