@@ -13,7 +13,7 @@ from dateutil.relativedelta import relativedelta
 
 # metadata
 daysStartPostUtcDay = [1, 2, 3, 4, 5, 6, 42]
-daysStartAfterEightPmUtc = [22, 23, 24]
+daysStartAfterEightPmUtc = [7, 22, 23, 24]
 daysPrevOnly = [31]
 daysCurrOnlyShort = [43]
 
@@ -34,9 +34,9 @@ def getDayData():
 
 def getFileDateFragments(dayRow):
     """
-    Calculate three identifying date fragments which will match all data
+    Calculate identifying date fragments which will match all data
     gathered for the day and no other data. This handles conversion from the
-    Narrabri local dates in the original csv to the UTC date times used in
+    Narrabri local date times in the original csv to the UTC date times used in
     RPFITS file names
     :param dayRow: The row of data for a day (will be day number and local date)
     :return: The date fragments for finding files named using ISO format UTC date times.
@@ -49,23 +49,16 @@ def getFileDateFragments(dayRow):
     #print prevDayDate.isoformat()
     days = []
     if dayNum in daysStartPostUtcDay:
-        for i in range(0,3):
-            days.append(dayDate.isoformat())
+        days.append(dayDate.isoformat())
     elif dayNum in daysStartAfterEightPmUtc:
         days.append(prevDayDate.isoformat() + "_2")
-        days.append(dayDate.isoformat() + "_0")
-        days.append(dayDate.isoformat() + "_1")
+        days.append(dayDate.isoformat() + "_[01]")
     elif dayNum in daysPrevOnly:
-        days.append(prevDayDate.isoformat() + "_1")
-        days.append(prevDayDate.isoformat() + "_2")
-        days.append(prevDayDate.isoformat() + "_2")
+        days.append(prevDayDate.isoformat() + "_[12]")
     elif dayNum in daysCurrOnlyShort:
-        days.append(dayDate.isoformat() + "_0")
-        days.append(dayDate.isoformat() + "_1")
-        days.append(dayDate.isoformat() + "_1")
+        days.append(dayDate.isoformat() + "_[01]")
     else:
-        days.append(prevDayDate.isoformat()+"_1")
-        days.append(prevDayDate.isoformat()+"_2")
+        days.append(prevDayDate.isoformat()+"_[12]")
         days.append(dayDate.isoformat()+"_0")
     return days
 
