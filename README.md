@@ -12,8 +12,9 @@ structure of the cold and warm HI gas at the locations of the MAGMO
 project observations (Green et al. , 2012). To enable this analysis I 
 will produce HI absorption and emission spectra from the MAGMO observations.
 
-| Author | James Dempsey |
+-- | --
 | Project Title | The Cold Neutral Medium As Seen By The MAGMO Project |
+| Author | James Dempsey |
 | Supervisor | Naomi McClure-Griffiths |
 
 
