@@ -15,7 +15,7 @@ import subprocess
 
 
 # functions
-def getDayData(day):
+def get_day_data(day):
     """
     Read the magmo-days-full.csv file and find the row for the requested day.
     :param day: The day to be found
@@ -75,7 +75,7 @@ def ensure_dir_exists(dirname):
     :return: None
     """
     if not os.path.exists(dirname):
-        os.mkdirs(dirname)
+        os.makedirs(dirname)
     if not os.path.isdir(dirname):
         print "Directory %s could not be created." % dirname
         exit(1)
@@ -91,7 +91,7 @@ if len(sys.argv) != 2:
 day = sys.argv[1]
 
 # Read metadata for the day (file pattern fragments etc)
-dayRow = getDayData(day)
+dayRow = get_day_data(day)
 if dayRow is None:
     print "Day %s is not defined." % (day)
     exit(1)
