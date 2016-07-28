@@ -49,15 +49,18 @@ observations will be largely of HMSF regions.
 
 ## Python programs
 
-- load_day.py day
-    - Uses atlod to extract the HI spectra and the 2GHz continuum
+- prep-days.py
+    - Prepares an extended list of days with the patterns to match the RPFITS files.
+- load-data.py day
+    - Uses atlod to extract the HI spectral data and the 2GHz continuum data
+    - Split out the uv data into sources (uvsplit)
     - Backup the flag, header and history files for each source
-- process-day.py day
-    - flag, split, calibrate, produce 2 GHz continuum image, produce HI image cube
-- analyse-day.py day
+- process-data.py day
+    - Flag, calibrate, produce 2 GHz continuum image, produce HI image cube
+- analyse-data.py day
     - Source find on continuum images
     - For each point of interest extract spectra, convert to opacity and output numerical spectrum
-- clean-day.py day
+- clean-data.py day
     - Remove all produced images and cubes, reset header, history and flags back to backed up files.
 - analyse-spectra.py
     - Read in all numerical spectra and produce reports
