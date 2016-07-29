@@ -58,7 +58,7 @@ def plot(x, y, c):
     plt.subplot(111, axisbg='black')
     plt.hexbin(x, y, c, cmap=plt.cm.gist_heat_r)
     # plt.scatter(x, y, cmap=plt.cm.YlOrRd_r)
-    plt.axis([xmin, xmax, ymin, ymax])
+    plt.axis([xmax, xmin, ymin, ymax])
     plt.title("Longitude-Velocity")
     plt.xlabel('Galactic longitude (l)')
     plt.ylabel('LSR Velocity (km/s)')
