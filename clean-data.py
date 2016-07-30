@@ -21,13 +21,23 @@ dayDirName = "day" + day
 
 # Delete the generated files
 print "Removing generated files"
-os.system("rm -r *beam")
-os.system("rm -r *dirty")
-os.system("rm -r *clean")
-os.system("rm -r *restor")
-os.system("rm -r *.fits")
+os.chdir(dayDirName)
+for band in ['1420', '1720']:
+    if os.path.exists(band):
+        os.chdir(band)
+        os.system("rm -r *beam")
+        os.system("rm -r *dirty")
+        os.system("rm -r *clean")
+        os.system("rm -r *restor")
+        os.system("rm -r *.fits")
+        os.chdir('..')
+
+os.chdir('..')
 
 # Copy from the backups back to the orignal files
+os.system("rm " + dayDirName + '/*/bandpass')
+os.system("rm " + dayDirName + '/*/gains')
+os.system("rm " + dayDirName + '/*/leakage')
 backupDirName = dayDirName+"/backup"
 for uvDir in os.listdir(backupDirName):
     print "Restoring backups for ", uvDir
