@@ -39,7 +39,7 @@ def get_day_obs_data(day):
     return sources
 
 
-def run_os_cmd(cmd):
+def run_os_cmd(cmd, failOnErr=True):
     """
     Run an operating system command ensuring that it finishes successfully.
     If the comand fails, the program will exit.
@@ -52,11 +52,13 @@ def run_os_cmd(cmd):
         if retcode != 0:
             message = "Command '"+cmd+"' failed with code " + str(retcode)
             print >>sys.stderr, message
-            raise CommandFailedError(message)
+            if failOnErr:
+                raise CommandFailedError(message)
     except OSError as e:
         message = "Command '" + cmd + "' failed " + e
         print >> sys.stderr, message
-        raise CommandFailedError(message)
+        if failOnErr:
+            raise CommandFailedError(message)
     return None
 
 

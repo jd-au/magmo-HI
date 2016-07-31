@@ -29,7 +29,9 @@ for band in ['1420', '1720']:
         os.system("rm -r *dirty")
         os.system("rm -r *clean")
         os.system("rm -r *restor")
+        os.system("rm -r *_ave")
         os.system("rm -r *.fits")
+        os.system("rm -r *.png")
         os.chdir('..')
 
 os.chdir('..')

@@ -5,18 +5,19 @@
 # to allow any processing to be simply rolled back.
 
 # TODO: Add dynamic flagging support - use an issues file
-# TODO: Generate a calibration report with diagnostic plots
-# TODO: Generate an image index page with previews of each image
 
 # Author James Dempsey
 # Date 30 Jul 2016
 
+import aplpy
 import csv
-import sys
-import os
 import glob
 import magmo
-import time as timer
+import os
+import sys
+import time
+
+from string import Template
 
 
 # functions to be made common
@@ -98,8 +99,6 @@ def calibrate(dirname, bandpass_cal, sources, band_list):
     """
     Prepare the bandpass, flux and phase calibration data.
 
-    TODO: Consider outputing a calibration report with plots.
-
     :param dirname: The name of the day directory
     :param bandpass_cal: The source name of the bandpass & flux calibrator
     :param sources: The list of sources, which includes the pahse calibrator details
@@ -111,6 +110,12 @@ def calibrate(dirname, bandpass_cal, sources, band_list):
     for src in sources:
         phase_cals.add(src["phase_cal"])
     print phase_cals
+
+    # Setup te index file
+    cal_idx = open(dirname + '/calibration.html', 'w')
+    t = Template('<html>\n<head><title>Calibration results for day $day</title></head>\n'
+                 + '<body>\n<h1>Calibration results for day $day</h1>\n<table>')
+    cal_idx.write(t.substitute(day=day))
 
     for band in band_list:
         freq = band['main']
@@ -125,7 +130,7 @@ def calibrate(dirname, bandpass_cal, sources, band_list):
 
         for cal in phase_cals:
             for src_freq in band['freqs']:
-                cal_file = dirname + '/' + cal + '.' + freq
+                cal_file = dirname + '/' + cal + '.' + src_freq
                 if os.path.exists(cal_file):
                     try:
                         print "##--## Processing phase cal " + cal_file + " ##--##"
@@ -137,16 +142,33 @@ def calibrate(dirname, bandpass_cal, sources, band_list):
                     except magmo.CommandFailedError as e:
                         error_list.append(str(e))
 
+                    prefix = dirname + '/' + freq + '/cal-' + cal + "-" + src_freq
+                    cmd = 'uvplt stokes=i,q,u,v axis=real,imag vis=' + cal_file \
+                          + ' device=' + prefix + '.png/png'
+                    magmo.run_os_cmd(cmd, False)
+                    cmd = 'gpplt yaxis=phase options=xygains vis=' + cal_file \
+                          + ' device=' + prefix + '-gain.png/png'
+                    magmo.run_os_cmd(cmd, False)
+                    t = Template('<tr><td colspan="2"><br>Source $cal at $src_freq MHz</td></tr>\n'
+                                 + '<tr>\n'
+                                 + '<td><a href="${prefix}.png"><img src="${prefix}.png" width="400px"></a></td></td>'
+                                 + '<td><a href="${prefix}-gain.png"><img src="${prefix}-gain.png" width="400px"></a></td>'
+                                 + '</tr>')
+                    cal_idx.write(t.substitute(cal=cal, src_freq=src_freq, prefix=prefix[len(dirname) + 1:]))
+
+    cal_idx.write('</table></body></html>\n')
+    cal_idx.close()
     return error_list
 
 
-def build_images(day_dir_name, sources, band):
+def build_images(day_dir_name, sources, band, day):
     """
     Generate continuum images of each field.
 
     :param day_dir_name: The name of the day directory
     :param sources: The list of sources, which includes the pahse calibrator details
     :param band: The map describing the continuum band to be processed
+    :param day: The day being processed
     :return: None
     """
 
@@ -156,6 +178,11 @@ def build_images(day_dir_name, sources, band):
     freq = band['main']
     magmo.ensure_dir_exists(freq)
     print "Producing %s MHz continuum images for %d sources" % (freq, len(sources))
+
+    img_idx = open('images.html', 'w')
+    t = Template('<html>\n<head><title>Image previews for day $day</title></head>\n'
+                 + '<body>\n<h1>Image previews for day $day at $freq MHz</h1>\n<table>')
+    img_idx.write(t.substitute(day=day, freq=freq))
 
     for src in sources:
         src_name = src['source']
@@ -168,12 +195,13 @@ def build_images(day_dir_name, sources, band):
             phase_cal_file = src['phase_cal'] + "." + freq_suffix
             magmo.run_os_cmd('gpcopy vis=' + phase_cal_file + ' out=' + src_file)
 
-            name_prefix = freq + '/magmo-' + src_name + '_' + freq + '_'
-            dirty_file = name_prefix + 'dirty'
-            clean_file = name_prefix + 'clean'
-            beam_file = name_prefix + 'beam'
-            restored_file = name_prefix + 'restor'
+            name_prefix = freq + '/magmo-' + src_name + '_' + freq
+            dirty_file = name_prefix + '_dirty'
+            clean_file = name_prefix + '_clean'
+            beam_file = name_prefix + '_beam'
+            restored_file = name_prefix + '_restor'
             fits_file = restored_file + '.fits'
+            png_file = name_prefix + '.png'
 
             cmd = 'invert robust=0.5 options=systemp,mfs,double stokes=ii vis=' + src_file \
                 + ' map=' + dirty_file + ' beam=' + beam_file
@@ -186,9 +214,22 @@ def build_images(day_dir_name, sources, band):
             magmo.run_os_cmd(cmd)
             cmd = 'fits op=xyout in=' + restored_file + ' out=' + fits_file
             magmo.run_os_cmd(cmd)
+
+            fig = aplpy.FITSFigure(fits_file)
+            fig.set_theme('publication')
+            fig.show_grayscale()
+            fig.add_colorbar()
+            fig.save(png_file)
+            t = Template('<tr><td><br>Source ${src_name}</td></tr>\n<tr>\n'
+                         + '<td><a href="${png_file}"><img src="${png_file}" width="500px"></a></td></tr>')
+            img_idx.write(t.substitute(png_file=png_file, src_name=src_name))
+
         except magmo.CommandFailedError as e:
             error_list.append(str(e))
 
+
+    img_idx.write('</table></body></html>\n')
+    img_idx.close()
     os.chdir('..')
     return error_list
 
@@ -228,8 +269,8 @@ def build_cubes(day_dir_name, sources, band):
             beam_file = name_prefix + 'sl_beam'
             restored_file = name_prefix + 'sl_restor'
             fits_file = restored_file + '.fits'
-            #line = 'felocity,1053,-250.0,0.4,0.4'
-            line = 'felocity,793,-225.0,0.4,0.4'
+            line = 'felocity,1053,-250.0,0.4,0.4'
+            #line = 'felocity,793,-225.0,0.4,0.4'
 
             cmd = 'uvaver line=' + line + ' vis=' + src_file + ' out=' + ave_file
             magmo.run_os_cmd(cmd)
@@ -260,7 +301,7 @@ if len(sys.argv) != 2:
     print("Usage: python process-data.py day")
     exit(1)
 day = sys.argv[1]
-start = timer.clock()
+start = time.time()
 
 # metadata needed: flux/bandpass cal, phase cals for each source, extra flagging
 # Read metadata for the day (file pattern fragments etc)
@@ -268,6 +309,8 @@ sources = get_day_obs_data(day)
 if sources is None or len(sources) == 0:
     print "Day %s is not defined." % (day)
     exit(1)
+print "#### Started processing MAGMO day %s at %s ####" % \
+      (day, time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start)))
 print "Found %d sources. First source:\n%s" % (len(sources), sources[0])
 error_list = []
 
@@ -296,15 +339,16 @@ error_list.extend(calibrate(dayDirName, bandpasscal, sources, band_list))
 print error_list
 
 # Produce 2 GHz continuum image
-error_list.extend(build_images(dayDirName, sources, cont_band))
+error_list.extend(build_images(dayDirName, sources, cont_band, day))
 
 # Produce HI image cube
 error_list.extend(build_cubes(dayDirName, sources, line_band))
 
 # Report
-end = timer.clock()
-print '#### Processing Completed ####'
-print 'Processed %d sources in %.03f s at %s' % (len(sources), end - start, timer.time())
+end = time.time()
+print '#### Processing Completed at %s ####' \
+      % (time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end)))
+print 'Processed %d sources in %.02f s' % (len(sources), end - start)
 if len(error_list) == 0:
     print "Hooray! No errors found."
 else:
