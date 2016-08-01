@@ -42,27 +42,57 @@ def get_day_obs_data(day):
 
 
 # functions specific to this step
+
+def get_day_flags(day):
+    """
+    Read the magmo-flagging.csv file and find the flagging needed for the requested day.
+    :param day: The day to be found
+    :return: The uvflag select clauses needed
+    """
+
+    flags = []
+    with open('magmo-flagging.csv', 'rb') as magmo_obs:
+        reader = csv.reader(magmo_obs)
+        for row in reader:
+            if row[0] == day:
+                select = ''
+                if len(row[1]) > 0:
+                    select = 'time('+row[1]+','+row[2]+')'
+                if len(row[3]) > 0:
+                    if len(select) > 0:
+                        select += ','
+                    select += 'ant('+row[3]+')'
+                if len(row[4]) > 0:
+                    if len(select) > 0:
+                        select += ','
+                    select += 'ant('+row[4]+')'
+                if len(row[5]) > 0:
+                    if len(select) > 0:
+                        select += ','
+                    select += 'pol('+row[5]+')'
+
+                flags.append(select)
+    return flags
+
 def flag_data(dirname, day):
     """
-    Flag out any bad data in the visibilities. This is a combinationof global flagging
-    and using previously compiled flaggin lists for the day's data.
-
-    TODO: Add read of file and flagging based on the file
+    Flag out any bad data in the visibilities. This is a combination of global flagging
+    and using previously compiled flagging lists for the day's data.
 
     :param dirname: The name of the day directory
     :param day: The day number being processed.
     :return: None
     """
-    # Need to add dynamic flagging e.g. day7: antenna 6,pol x and antenna 4
+    dynamic_flags = get_day_flags(day)
     uvDirs = glob.glob(dirname + '/*.[0-9][0-9][0-9][0-9]')
     for filename in uvDirs:
         uvflag_cmd = "uvflag flagval=f options=brief vis='"+filename+"' select='amplitude(500)'"
         magmo.run_os_cmd(uvflag_cmd)
-        # todo: make these configurable
-        uvflag_cmd = "uvflag flagval=f options=brief vis='" + filename + "' select='ant(4)'"
-        magmo.run_os_cmd(uvflag_cmd)
-        uvflag_cmd = "uvflag flagval=f options=brief vis='" + filename + "' select='ant(6),pol(xx)'"
-        magmo.run_os_cmd(uvflag_cmd)
+
+        for flag in dynamic_flags:
+            uvflag_cmd = "uvflag flagval=f options=brief vis='" + filename + "' select='" \
+                         + flag + "'"
+            magmo.run_os_cmd(uvflag_cmd)
 
     return []
 
