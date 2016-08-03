@@ -9,9 +9,10 @@
 
 import csv
 import sys
+import magmo
 import os
 import shutil
-import subprocess
+import time
 
 
 # functions
@@ -30,24 +31,6 @@ def get_day_data(day):
     return None
 
 
-def run_os_cmd(cmd):
-    """
-    Run an operating system command ensuring that it finishes successfully.
-    If the comand fails, the program will exit.
-    :param cmd: The command to be run
-    :return: None
-    """
-    print ">", cmd
-    try:
-        retcode = subprocess.call(cmd, shell=True)
-        if retcode != 0:
-            print >>sys.stderr, "Command '"+cmd+"' failed with code", retcode
-            exit(1)
-    except OSError as e:
-        print >>sys.stderr, "Command '"+cmd+"' failed:", e
-        exit(1)
-
-
 def load_rpfits(freq, ifsel, restFreq, dayNum, inFilePatterns):
     """
     Run atlod to extract data files for a particular frequency from a set of
@@ -64,21 +47,7 @@ def load_rpfits(freq, ifsel, restFreq, dayNum, inFilePatterns):
     atlodCmd = "atlod in='" + inFilePatterns + "' out='" + outFile + "' " \
                + "ifsel=" + str(ifsel) + " restfreq=" + restFreq \
                + " options=birdie,xycorr,noauto,rfiflag"
-    run_os_cmd(atlodCmd)
-
-
-def ensure_dir_exists(dirname):
-    """
-    Check if a folder does not exists, and if it doesn't, create it. Fail the
-    program if the folder could not be created.
-    :param dirname: The name of the folder to be created.
-    :return: None
-    """
-    if not os.path.exists(dirname):
-        os.makedirs(dirname)
-    if not os.path.isdir(dirname):
-        print "Directory %s could not be created." % dirname
-        exit(1)
+    magmo.run_os_cmd(atlodCmd)
 
 
 # ### Script starts here ###
@@ -89,17 +58,20 @@ if len(sys.argv) != 2:
     print("Usage: python load-data.py day")
     exit(1)
 day = sys.argv[1]
+start = time.time()
 
 # Read metadata for the day (file pattern fragments etc)
 dayRow = get_day_data(day)
 if dayRow is None:
     print "Day %s is not defined." % (day)
     exit(1)
+print "#### Started loading MAGMO day %s at %s ####" % \
+      (day, time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start)))
 print dayRow
 
 # Make day directory
 dayDirName = "day" + day
-ensure_dir_exists(dayDirName)
+magmo.ensure_dir_exists(dayDirName)
 
 # Load files
 freqList = ["1421", "1720"]
@@ -121,18 +93,27 @@ os.chdir("day" + dayRow[0])
 for freq in freqList:
     uvFile = "MAGMO_day" + dayRow[0] + "_" + freq + ".uv"
     uvsplitCmd = "uvsplit vis=" + uvFile
-    run_os_cmd(uvsplitCmd)
+    magmo.run_os_cmd(uvsplitCmd)
 os.chdir("..")
 
 # Backup
 backupDirName = dayDirName+"/backup"
-ensure_dir_exists(backupDirName)
+magmo.ensure_dir_exists(backupDirName)
 for uvDir in os.listdir(dayDirName):
     uvDirName = dayDirName + "/" + uvDir
     if (not uvDirName.endswith("backup")) and os.path.isdir(uvDirName):
         uvBackupDir = backupDirName + "/" + uvDir
-        ensure_dir_exists(uvBackupDir)
+        magmo.ensure_dir_exists(uvBackupDir)
         for name in ['flags', 'header', 'history']:
             shutil.copy2(uvDirName + "/" + name, uvBackupDir)
 
+# Cleanup
+for freq in freqList:
+    cmd = 'rm -rf day' + dayRow[0] + '/MAGMO_day' + dayRow[0] + '_' + freq + '.uv'
+    magmo.run_os_cmd(cmd)
+
 # Report
+end = time.time()
+print '#### Loading completed at %s ####' \
+      % (time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end)))
+print 'Processed in %.02f s' % (end - start)
