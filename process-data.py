@@ -4,8 +4,6 @@
 # from the day's RPFITS files into miriad format. It then backs up the metadata
 # to allow any processing to be simply rolled back.
 
-# TODO: Add dynamic flagging support - use an issues file
-
 # Author James Dempsey
 # Date 30 Jul 2016
 
@@ -155,6 +153,7 @@ def calibrate(dirname, bandpass_cal, sources, band_list):
             print "No bandpass file found for band %s." % (freq)
             exit(1)
 
+        #todo: Need to add line params to these - different for each band
         magmo.run_os_cmd("mfcal vis="+bp_file+" options=interpolate")
         magmo.run_os_cmd("gpcal vis="+bp_file+" options=xyvary")
 
@@ -351,8 +350,8 @@ if not os.path.isdir(dayDirName):
     exit(1)
 
 # set up map of parent/child map of frequencies
-line_band = {'main': '1420', 'freqs': ['1420', '1421']}
-cont_band = {'main': '1720', 'freqs': ['1720', '1721']}
+line_band = {'main': '1420', 'freqs': ['1420', '1421', '1420.5']}
+cont_band = {'main': '1720', 'freqs': ['1720', '1721', '1720.5']}
 band_list = [line_band, cont_band]
 for band in band_list:
     freq = band['main']
