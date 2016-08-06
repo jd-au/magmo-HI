@@ -10,6 +10,7 @@ patternRestored='.*_restor$'
 import os
 import re
 import subprocess
+import sys
 import math
 
 class SourceStats:
@@ -47,20 +48,30 @@ def getSrcStats(allstats, srcName):
     return srcStats
 
 
+# Scirpt starts here
+# Read day parameter
+if len(sys.argv) != 2:
+    print("Incorrect number of parameters.")
+    print("Usage: python list-stats.py day")
+    exit(1)
+day = sys.argv[1]
+dayDirName = "day" + day
+
 allstats = dict()
-for f in os.listdir('.'):
+dir_name = dayDirName + "/1757/"
+for f in os.listdir(dir_name):
     match = re.search('[0-9]+\.[0-9]+[+-][0-9.]+', f)
     if match is not None:
         srcName = match.group()
     if re.match(patternClean, f):
         #print "Found file %s for src %s" % (f, srcName)
-        rms, max = getSignalNoiseRatio(f)
+        rms, max = getSignalNoiseRatio(dir_name+f)
         srcStats = getSrcStats(allstats, srcName)
         #print rms
         srcStats.rms[0] = rms
         srcStats.max_sig[0] = max
     if re.match(patternRestored, f):
-        rms, max = getSignalNoiseRatio(f)
+        rms, max = getSignalNoiseRatio(dir_name+f)
         srcStats = getSrcStats(allstats, srcName)
         srcStats.rms[1] = rms
         srcStats.max_sig[1] = max
@@ -71,8 +82,8 @@ keys.sort()
 for srcName in keys:
     stats = allstats.get(srcName)
     sn_ratio = [0,0]
-    sn_ratio[0] = stats.max_sig[0]/stats.rms[0]
-    sn_ratio[1] = stats.max_sig[1]/stats.rms[1]
+    sn_ratio[0] = stats.max_sig[0]/(1 if stats.rms[0] == 0 else stats.rms[0])
+    sn_ratio[1] = stats.max_sig[1]/(1 if stats.rms[1] == 0 else stats.rms[1])
     print '%s rms: %.3e max: %.3e s/n: %.2e, s/n/chan: %.2e Rs/n: %.2e, Rs/n/chan: %.2e' % \
           (stats.source, stats.rms[0], stats.max_sig[0], sn_ratio[0], sn_ratio[0]/math.sqrt(channels), sn_ratio[1], sn_ratio[1]/math.sqrt(channels))
 
@@ -80,7 +91,10 @@ print '\n\n"File","RMS","MAX","Clean S/N","Clean S/N/Chan","Restored S/N","Resto
 for srcName in keys:
     stats = allstats.get(srcName)
     sn_ratio = [0,0]
-    sn_ratio[0] = stats.max_sig[0]/stats.rms[0]
-    sn_ratio[1] = stats.max_sig[1]/stats.rms[1]
-    print '"%s",%.2e,%.2e,%.2e,%.2e,%.2e,%.2e,' % \
-          (stats.source, stats.rms[0], stats.max_sig[0], sn_ratio[0], sn_ratio[0]/math.sqrt(channels), sn_ratio[1], sn_ratio[1]/math.sqrt(channels))
+    sn_ratio[0] = stats.max_sig[0]/(1 if stats.rms[0] == 0 else stats.rms[0])
+    sn_ratio[1] = stats.max_sig[1]/(1 if stats.rms[1] == 0 else stats.rms[1])
+    sn_chan = sn_ratio[1]/math.sqrt(channels)
+    use = sn_chan > 3
+    print '"%s",%.2e,%.2e,%.2e,%.2e,%.2e,%.2e,%s' % \
+          (stats.source, stats.rms[0], stats.max_sig[0], sn_ratio[0], sn_ratio[0]/math.sqrt(channels), sn_ratio[1],
+           sn_chan,("Use" if use else ""))

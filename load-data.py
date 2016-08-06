@@ -74,9 +74,9 @@ dayDirName = "day" + day
 magmo.ensure_dir_exists(dayDirName)
 
 # Load files
-freqList = ["1421", "1720"]
+freqList = ["1421", "1757"]
 ifList = [7, 4]
-restFreqList = ["1.420405752", "1.72053"]
+restFreqList = ["1.420405752", "1.757"]
 inFilePatterns = ""
 startDatePatterns = 2
 for i in range(startDatePatterns, len(dayRow)):

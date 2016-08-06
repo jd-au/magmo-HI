@@ -11,7 +11,10 @@ import aplpy
 import csv
 import glob
 import magmo
+import math
 import os
+import re
+import subprocess
 import sys
 import time
 
@@ -123,7 +126,7 @@ def find_freq_file(name_prefix, freq_list):
     return None, None
 
 
-def calibrate(dirname, bandpass_cal, sources, band_list):
+def calibrate(dirname, bandpass_cal, sources, band_list, day):
     """
     Prepare the bandpass, flux and phase calibration data.
 
@@ -131,6 +134,7 @@ def calibrate(dirname, bandpass_cal, sources, band_list):
     :param bandpass_cal: The source name of the bandpass & flux calibrator
     :param sources: The list of sources, which includes the pahse calibrator details
     :param band_list: The list of bands being processed, each band is a map
+    :param day: The day number being processed
     :return: error list
     """
     error_list = []
@@ -153,9 +157,20 @@ def calibrate(dirname, bandpass_cal, sources, band_list):
             print "No bandpass file found for band %s." % (freq)
             exit(1)
 
-        #todo: Need to add line params to these - different for each band
+        # todo: Need to add line params to these - different for each band
         magmo.run_os_cmd("mfcal vis="+bp_file+" options=interpolate")
         magmo.run_os_cmd("gpcal vis="+bp_file+" options=xyvary")
+
+        # Plot bandpass of bandpass cal
+        magmo.run_os_cmd("gpplt options=bandpass vis="+bp_file+" device=" + bp_file +
+                         "-bandpass.png/png")
+
+        t = Template('<tr><td colspan="2"><br>Bandpass of $bp_cal at $src_freq MHz</td></tr>\n' +
+                     '<tr>\n<td>' +
+                     '<a href="${bp_file}-bandpass.png"><img src="${bp_file}-bandpass.png" width="400px"></a>' +
+                     '</td><td></td>\n</tr>')
+        cal_idx.write(t.substitute(bp_cal=bandpass_cal, src_freq=freq,
+                                   bp_file=bp_file[len(dirname) + 1:]))
 
         for cal in phase_cals:
             for src_freq in band['freqs']:
@@ -246,9 +261,10 @@ def build_images(day_dir_name, sources, band, day):
 
             fig = aplpy.FITSFigure(fits_file)
             fig.set_theme('publication')
-            fig.show_grayscale()
+            fig.show_grayscale(0, None, 0.25)
             fig.add_colorbar()
             fig.save(png_file)
+            fig.close()
             t = Template('<tr><td><br>Source ${src_name}</td></tr>\n<tr>\n'
                          + '<td><a href="${png_file}"><img src="${png_file}" width="500px"></a></td></tr>')
             img_idx.write(t.substitute(png_file=png_file, src_name=src_name))
@@ -256,11 +272,61 @@ def build_images(day_dir_name, sources, band, day):
         except magmo.CommandFailedError as e:
             error_list.append(str(e))
 
-
     img_idx.write('</table></body></html>\n')
     img_idx.close()
     os.chdir('..')
     return error_list
+
+
+def get_signal_noise_ratio(miriad_file):
+    """
+    Retreive the singal to noise ratio for a miriad image file.
+    :param miriad_file:
+    :return: The root mean square of the data and the maximum flux density
+    """
+    result = subprocess.check_output(["imstat", "in="+miriad_file, "options=guaranteespaces"])
+    total_next = False
+    for line in result.splitlines():
+        # print line
+        if total_next:
+            stats = line.strip().split()
+            #print stats
+            #mean = float(stats[1])
+            rms = float(stats[2])
+            max = float(stats[3])
+            return rms, max
+        if re.match('^[ \t]*Total', line):
+            total_next = True
+    print "Unable to find totals in:"
+    print result
+
+
+def find_strong_sources(day_dir_name, freq, sources, num_chan, min_sn):
+    """
+    Identify the source files with a maxomum signla to noise which is greater than a threshold, that
+    is those restored images whcih show a source sufficiently brighter than the background noise.
+
+    :param day_dir_name: The name of the day directory
+    :param freq: The primary identifier of the frequency to be checked.
+    :param sources: The list of sources, which includes the pahse calibrator details
+    :param num_chan: The number of channels in the line data
+    :param min_sn: The minimum signal to noise ratio to be a 'strong' source.
+    :return: A list of the source names filtered to just those with bright sources
+    """
+    strong_sources = []
+    for src in sources:
+        src_name = src['source']
+        restored_img = day_dir_name + "/" + freq + "/magmo-" + src_name + "_" + freq + "_restor"
+        if os.path.exists(restored_img):
+            rms, max = get_signal_noise_ratio(restored_img)
+            sn = 0
+            if rms > 0:
+                sn = max / rms
+            sn = sn / math.sqrt(num_chan)
+            if sn > min_sn:
+                strong_sources.append(src)
+
+    return strong_sources
 
 
 def build_cubes(day_dir_name, sources, band):
@@ -269,7 +335,7 @@ def build_cubes(day_dir_name, sources, band):
 
     :param day_dir_name: The name of the day directory
     :param sources: The list of sources, which includes the pahse calibrator details
-    :param freq_list: The list of short identifiers of the frequencies
+    :param band: The definition of the band being processed.
     :return: None
     """
 
@@ -322,65 +388,76 @@ def build_cubes(day_dir_name, sources, band):
     return error_list
 
 
-# ### Script starts here ###
+def main():
+    """
+    Main script for process_data
+    :return: None
+    """
+    # Read day parameter
+    if len(sys.argv) != 2:
+        print("Incorrect number of parameters.")
+        print("Usage: python process_data.py day")
+        exit(1)
+    day = sys.argv[1]
+    start = time.time()
 
-# Read day parameter
-if len(sys.argv) != 2:
-    print("Incorrect number of parameters.")
-    print("Usage: python process-data.py day")
-    exit(1)
-day = sys.argv[1]
-start = time.time()
+    # metadata needed: flux/bandpass cal, phase cals for each source, extra flagging
+    # Read metadata for the day (file pattern fragments etc)
+    sources = get_day_obs_data(day)
+    if sources is None or len(sources) == 0:
+        print "Day %s is not defined." % (day)
+        exit(1)
+    print "#### Started processing MAGMO day %s at %s ####" % \
+          (day, time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start)))
+    print "Found %d sources. First source:\n%s" % (len(sources), sources[0])
+    error_list = []
 
-# metadata needed: flux/bandpass cal, phase cals for each source, extra flagging
-# Read metadata for the day (file pattern fragments etc)
-sources = get_day_obs_data(day)
-if sources is None or len(sources) == 0:
-    print "Day %s is not defined." % (day)
-    exit(1)
-print "#### Started processing MAGMO day %s at %s ####" % \
-      (day, time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start)))
-print "Found %d sources. First source:\n%s" % (len(sources), sources[0])
-error_list = []
+    # Check metadata against file system
+    dayDirName = "day" + day
+    if not os.path.isdir(dayDirName):
+        print "Directory %s could not be found." % dayDirName
+        exit(1)
 
-# Check metadata against file system
-dayDirName = "day" + day
-if not os.path.isdir(dayDirName):
-    print "Directory %s could not be found." % dayDirName
-    exit(1)
+    # set up map of parent/child map of frequencies
+    line_band = {'main': '1420', 'freqs': ['1420', '1421', '1420.5'], 'line': True}
+    cont_band = {'main': '1757', 'freqs': ['1757', '1721', '1720'], 'line': False}
+    band_list = [line_band, cont_band]
+    for band in band_list:
+        freq = band['main']
+        freq_dir = dayDirName + "/" + freq
+        magmo.ensure_dir_exists(freq_dir)
 
-# set up map of parent/child map of frequencies
-line_band = {'main': '1420', 'freqs': ['1420', '1421', '1420.5']}
-cont_band = {'main': '1720', 'freqs': ['1720', '1721', '1720.5']}
-band_list = [line_band, cont_band]
-for band in band_list:
-    freq = band['main']
-    freqDir = dayDirName + "/" + freq
-    magmo.ensure_dir_exists(freqDir)
+    # Flag
+    error_list.extend(flag_data(dayDirName, day))
 
-# Flag
-error_list.extend(flag_data(dayDirName, day))
+    # Calibrate
+    bandpasscal = find_bandpasscal(dayDirName)
+    print "Bandpass cal:", bandpasscal
+    error_list.extend(calibrate(dayDirName, bandpasscal, sources, band_list, day))
+    print error_list
 
-# Calibrate
-bandpasscal = find_bandpasscal(dayDirName)
-print "Bandpass cal:", bandpasscal
-error_list.extend(calibrate(dayDirName, bandpasscal, sources, band_list))
-print error_list
+    # Produce 2 GHz continuum image
+    error_list.extend(build_images(dayDirName, sources, cont_band, day))
 
-# Produce 2 GHz continuum image
-error_list.extend(build_images(dayDirName, sources, cont_band, day))
+    # Produce HI image cube
+    strong_sources = find_strong_sources(dayDirName, cont_band['main'], sources, 1053, 3)
+    print "### Found the following bright sources in the data ", strong_sources
+    error_list.extend(build_cubes(dayDirName, strong_sources, line_band))
 
-# Produce HI image cube
-error_list.extend(build_cubes(dayDirName, sources, line_band))
+    # Report
+    end = time.time()
+    print '#### Processing Completed at %s ####' \
+          % (time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end)))
+    print 'Processed %d sources (%d strong enough to produce cubes) in %.02f s' % (len(sources),
+                                                                                   len(strong_sources),
+                                                                                   end - start)
+    if len(error_list) == 0:
+        print "Hooray! No errors found."
+    else:
+        print "%d errors were encountered:" % (len(error_list))
+        for err in error_list:
+            print err
 
-# Report
-end = time.time()
-print '#### Processing Completed at %s ####' \
-      % (time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end)))
-print 'Processed %d sources in %.02f s' % (len(sources), end - start)
-if len(error_list) == 0:
-    print "Hooray! No errors found."
-else:
-    print "%d errors were encountered:" % (len(error_list))
-    for err in error_list:
-        print err
+# Run the script if it is called from the command line
+if __name__ == "__main__":
+    main()
