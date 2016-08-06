@@ -420,7 +420,7 @@ def main():
 
     # set up map of parent/child map of frequencies
     line_band = {'main': '1420', 'freqs': ['1420', '1421', '1420.5'], 'line': True}
-    cont_band = {'main': '1757', 'freqs': ['1757', '1721', '1720'], 'line': False}
+    cont_band = {'main': '1757', 'freqs': ['1757', '1721', '1720', '1720.5'], 'line': False}
     band_list = [line_band, cont_band]
     for band in band_list:
         freq = band['main']
