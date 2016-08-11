@@ -101,16 +101,16 @@ backupDirName = dayDirName+"/backup"
 magmo.ensure_dir_exists(backupDirName)
 for uvDir in os.listdir(dayDirName):
     uvDirName = dayDirName + "/" + uvDir
-    if (not uvDirName.endswith("backup")) and os.path.isdir(uvDirName):
+    if (not uvDirName.endswith("backup")) and (not uvDirName.endswith(".uv")) and os.path.isdir(uvDirName):
         uvBackupDir = backupDirName + "/" + uvDir
         magmo.ensure_dir_exists(uvBackupDir)
         for name in ['flags', 'header', 'history']:
             shutil.copy2(uvDirName + "/" + name, uvBackupDir)
 
 # Cleanup
-for freq in freqList:
-    cmd = 'rm -rf day' + dayRow[0] + '/MAGMO_day' + dayRow[0] + '_' + freq + '.uv'
-    magmo.run_os_cmd(cmd)
+#for freq in freqList:
+#    cmd = 'rm -rf day' + dayRow[0] + '/MAGMO_day' + dayRow[0] + '_' + freq + '.uv'
+#    magmo.run_os_cmd(cmd)
 
 # Report
 end = time.time()

@@ -22,7 +22,7 @@ dayDirName = "day" + day
 # Delete the generated files
 print "Removing generated files"
 os.chdir(dayDirName)
-for band in ['1420', '1720']:
+for band in ['1420', '1757']:
     if os.path.exists(band):
         os.chdir(band)
         os.system("rm -r *beam")

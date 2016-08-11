@@ -46,7 +46,7 @@ for src in sources:
             sn = max / rms
         sn /= math.sqrt(1053)
 
-    img_idx.write('<tr><td>' + src_name + '<br>S/N: ' + str(sn) + '</td>\n')
+    img_idx.write('<tr><td>' + src_name + '<br>S/N: ' + str(sn) + '<br>Max: ' + str(max) + '</td>\n')
     for freq in ['1757', '1420']:
         fits_file = freq + name_prefix + freq + '_restor.fits'
         img = freq + name_prefix + freq + '.png'
@@ -54,7 +54,7 @@ for src in sources:
         if os.path.exists(fits_file):
             fig = aplpy.FITSFigure(fits_file)
             fig.set_theme('publication')
-            fig.show_grayscale(0, None, 0.25)
+            fig.show_grayscale(0, None, 0.5)
             fig.add_colorbar()
             fig.save(img)
             fig.close()
