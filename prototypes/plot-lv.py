@@ -29,12 +29,13 @@ def readData():
         votable = parse(filename, pedantic=False)
         results = next(resource for resource in votable.resources if resource.type == "results")
         if results is not None:
+            gal_info = None
             for info in votable.infos:
                 if info.name == 'longitude':
                     gal_info = info
             #gal_info = votable.get_info_by_id('longitude')
             if gal_info is None:
-                print "No longitude provided for %s, skipping" , filename
+                print "No longitude provided for %s, skipping" % filename
                 continue
             gal_long = int(float(gal_info.value))
             if gal_long > 180:
@@ -48,7 +49,7 @@ def readData():
 
     return x, y, c
 
-def plot(x, y, c):
+def plot(x, y, c, filename):
     xmin=-180
     xmax = 180
     ymin = -100
@@ -72,10 +73,11 @@ def plot(x, y, c):
     #cb = plt.colorbar()
     #cb.set_label('log10(N)')
 
-    plt.show()
+    plt.savefig(filename)
+    # plt.show()
     return
 
 ## Script starts here
 #x, y, c = createSampleData()
 x, y, c = readData()
-plot(x, y, c)
+plot(x, y, c, 'magmo-lv.pdf')
