@@ -19,6 +19,21 @@ class CommandFailedError(Exception):
 
 
 # functions to be made common
+def get_day_file_data(day):
+    """
+    Read the magmo-days-full.csv file and find the row for the requested day.
+    :param day: The day to be found
+    :return: The day's row, or None if the day is not defined
+    """
+
+    with open('magmo-days-full.csv', 'rb') as magmodays:
+        reader = csv.reader(magmodays)
+        for row in reader:
+            if row[0] == day:
+                return row
+    return None
+
+
 def get_day_obs_data(day):
     """
     Read the magmo-obs.csv file and find the rows for the requested day.

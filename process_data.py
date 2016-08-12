@@ -21,29 +21,6 @@ import time
 from string import Template
 
 
-# functions to be made common
-def get_day_obs_data(day):
-    """
-    Read the magmo-obs.csv file and find the rows for the requested day.
-    :param day: The day to be found
-    :return: The day's rows, or None if the day is not defined
-    """
-
-    sources = []
-    with open('magmo-obs.csv', 'rb') as magmo_obs:
-        reader = csv.reader(magmo_obs)
-        for row in reader:
-            if row[0] == day:
-                src = dict()
-                src['source'] = row[4]
-                src['phase_cal'] = row[10]
-                src['gal_l'] = row[2]
-                sources.append(src)
-    return sources
-
-
-# functions specific to this step
-
 def get_day_flags(day):
     """
     Read the magmo-flagging.csv file and find the flagging needed for the requested day.
@@ -75,7 +52,8 @@ def get_day_flags(day):
                 flags.append(select)
     return flags
 
-def flag_data(dirname, day):
+
+def flag_data(dirname, day, bandpass_cal, sources):
     """
     Flag out any bad data in the visibilities. This is a combination of global flagging
     and using previously compiled flagging lists for the day's data.
@@ -84,7 +62,12 @@ def flag_data(dirname, day):
     :param day: The day number being processed.
     :return: None
     """
+
+    calibrators = set(bandpass_cal)
+    for src in sources:
+        calibrators.add(src["phase_cal"])
     dynamic_flags = get_day_flags(day)
+    #dynamic_flags = []
     uvDirs = glob.glob(dirname + '/*.[0-9][0-9][0-9][0-9]')
     for filename in uvDirs:
         uvflag_cmd = "uvflag flagval=f options=brief vis='"+filename+"' select='amplitude(500)'"
@@ -94,6 +77,25 @@ def flag_data(dirname, day):
             uvflag_cmd = "uvflag flagval=f options=brief vis='" + filename + "' select='" \
                          + flag + "'"
             magmo.run_os_cmd(uvflag_cmd)
+
+    # Clip the data too far away for the mean in the calibrators
+    for cal_src in calibrators:
+        pattern = dirname + '/' + cal_src + '.[0-9][0-9][0-9][0-9]'
+        print pattern
+        uvDirs = glob.glob(pattern)
+        for filename in uvDirs:
+            tvclip_cmd = "tvclip options=notv commands=clip,diff,clip clip=3 vis='" + filename + "'"
+            magmo.run_os_cmd(tvclip_cmd)
+
+    # Flag the 0 km/s HI line in the calibrator
+    #pattern = dirname + '/' + bandpass_cal + '.142[0-9](\.[0-9])?'
+    pattern = dirname + '/' + bandpass_cal + '.142[0-9]'
+    print pattern
+    uvDirs = glob.glob(pattern)
+    for filename in uvDirs:
+        # line=channel,110,2430,1,1
+        uvflag_cmd = "uvflag flagval=f options=brief vis='"+filename+"' line='channel,110,2430,1,1'"
+        magmo.run_os_cmd(uvflag_cmd)
 
     return []
 
@@ -193,11 +195,20 @@ def calibrate(dirname, bandpass_cal, sources, band_list, day):
                     cmd = 'gpplt yaxis=phase options=xygains vis=' + cal_file \
                           + ' device=' + prefix + '-gain.png/png'
                     magmo.run_os_cmd(cmd, False)
-                    t = Template('<tr><td colspan="2"><br>Source $cal at $src_freq MHz</td></tr>\n'
+                    cmd = 'uvplt axis=time,amplitude vis=' + cal_file \
+                          + ' device=' + prefix + '-amp.png/png'
+                    magmo.run_os_cmd(cmd, False)
+                    t = Template('<tr><td colspan="3"><br>Source $cal at $src_freq MHz</td></tr>\n'
                                  + '<tr>\n'
                                  + '<td><a href="${prefix}.png"><img src="${prefix}.png" width="400px"></a></td></td>'
+                                 + '<td><a href="${prefix}-amp.png"><img src="${prefix}-amp.png" width="400px"></a></td>'
                                  + '<td><a href="${prefix}-gain.png"><img src="${prefix}-gain.png" width="400px"></a></td>'
-                                 + '</tr>')
+                                 + '</tr>'
+                                + '<tr>\n'
+                                + '<td><a href="${prefix}.png_2"><img src="${prefix}.png_2" width="400px"></a></td></td>'
+                                + '<td><a href="${prefix}-amp.png_2"><img src="${prefix}-amp.png_2" width="400px"></a></td>'
+                                + '<td></td>'
+                                + '</tr>')
                     cal_idx.write(t.substitute(cal=cal, src_freq=src_freq, prefix=prefix[len(dirname) + 1:]))
 
     cal_idx.write('</table></body></html>\n')
@@ -248,6 +259,7 @@ def build_images(day_dir_name, sources, band, day):
             png_file = name_prefix + '.png'
 
             cmd = 'invert robust=0.5 options=systemp,mfs,double stokes=ii vis=' + src_file \
+                + ' slop=1.0 ' \
                 + ' map=' + dirty_file + ' beam=' + beam_file
             magmo.run_os_cmd(cmd)
             cmd = 'clean niters=2000 speed=+1 map=' + dirty_file + ' beam=' \
@@ -370,7 +382,7 @@ def build_cubes(day_dir_name, sources, band):
             cmd = 'uvaver line=' + line + ' vis=' + src_file + ' out=' + ave_file
             magmo.run_os_cmd(cmd)
             cmd = 'invert robust=0.5 cell=5 options=systemp,nopol,mosaic,double stokes=i '\
-                + ' slop=0.5 line='+ line + ' vis=' + ave_file \
+                + ' slop=1.0 line='+ line + ' vis=' + ave_file \
                 + ' map=' + dirty_file + ' beam=' + beam_file
             magmo.run_os_cmd(cmd)
             cmd = 'clean niters=2000 speed=+1 map=' + dirty_file + ' beam=' \
@@ -403,7 +415,7 @@ def main():
 
     # metadata needed: flux/bandpass cal, phase cals for each source, extra flagging
     # Read metadata for the day (file pattern fragments etc)
-    sources = get_day_obs_data(day)
+    sources = magmo.get_day_obs_data(day)
     if sources is None or len(sources) == 0:
         print "Day %s is not defined." % (day)
         exit(1)
@@ -428,11 +440,11 @@ def main():
         magmo.ensure_dir_exists(freq_dir)
 
     # Flag
-    error_list.extend(flag_data(dayDirName, day))
-
-    # Calibrate
     bandpasscal = find_bandpasscal(dayDirName)
     print "Bandpass cal:", bandpasscal
+    error_list.extend(flag_data(dayDirName, day, bandpasscal, sources))
+
+    # Calibrate
     error_list.extend(calibrate(dayDirName, bandpasscal, sources, band_list, day))
     print error_list
 
@@ -440,7 +452,7 @@ def main():
     error_list.extend(build_images(dayDirName, sources, cont_band, day))
 
     # Produce HI image cube
-    strong_sources = find_strong_sources(dayDirName, cont_band['main'], sources, 1053, 3)
+    strong_sources = find_strong_sources(dayDirName, cont_band['main'], sources, 1053, 1.2)
     print "### Found the following bright sources in the data ", strong_sources
     error_list.extend(build_cubes(dayDirName, strong_sources, line_band))
 
