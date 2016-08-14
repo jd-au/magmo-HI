@@ -8,6 +8,7 @@
 # Date 7 Jul 2016
 
 import csv
+import glob
 import sys
 import magmo
 import os
@@ -94,7 +95,12 @@ for freq in freqList:
     uvFile = "MAGMO_day" + dayRow[0] + "_" + freq + ".uv"
     uvsplitCmd = "uvsplit vis=" + uvFile
     magmo.run_os_cmd(uvsplitCmd)
+# Rename any 1420.5 folders to remove the decimal
+uv_dirs = glob.glob('*.[0-9][0-9][0-9][0-9].[0-9]')
+for uvdir in uv_dirs:
+    os.rename(uvdir, uvdir[:-2])
 os.chdir("..")
+
 
 # Backup
 backupDirName = dayDirName+"/backup"
