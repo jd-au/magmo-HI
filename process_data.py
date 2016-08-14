@@ -48,8 +48,8 @@ def get_day_flags(day):
                     if len(select) > 0:
                         select += ','
                     select += 'pol('+row[5]+')'
-
-                flags.append(select)
+                flag_details = {'uv_file':row[6], 'select':select, 'line':row[7]}
+                flags.append(flag_details)
     return flags
 
 
@@ -63,7 +63,8 @@ def flag_data(dirname, day, bandpass_cal, sources):
     :return: None
     """
 
-    calibrators = set(bandpass_cal)
+    calibrators = set()
+    calibrators.add(bandpass_cal)
     for src in sources:
         calibrators.add(src["phase_cal"])
     dynamic_flags = get_day_flags(day)
@@ -74,8 +75,11 @@ def flag_data(dirname, day, bandpass_cal, sources):
         magmo.run_os_cmd(uvflag_cmd)
 
         for flag in dynamic_flags:
-            uvflag_cmd = "uvflag flagval=f options=brief vis='" + filename + "' select='" \
-                         + flag + "'"
+            flag_file = flag['uv_file']
+            if flag_file is None or len(flag_file) == 0 or filename.endswith(flag_file):
+                uvflag_cmd = "uvflag flagval=f options=brief vis='" + filename + "' "
+                uvflag_cmd += " select='" + flag['select'] + "'"
+                uvflag_cmd += " line='" + flag['line'] + "'"
             magmo.run_os_cmd(uvflag_cmd)
 
     # Clip the data too far away for the mean in the calibrators
@@ -86,16 +90,6 @@ def flag_data(dirname, day, bandpass_cal, sources):
         for filename in uvDirs:
             tvclip_cmd = "tvclip options=notv commands=clip,diff,clip clip=3 vis='" + filename + "'"
             magmo.run_os_cmd(tvclip_cmd)
-
-    # Flag the 0 km/s HI line in the calibrator
-    #pattern = dirname + '/' + bandpass_cal + '.142[0-9](\.[0-9])?'
-    pattern = dirname + '/' + bandpass_cal + '.142[0-9]'
-    print pattern
-    uvDirs = glob.glob(pattern)
-    for filename in uvDirs:
-        # line=channel,110,2430,1,1
-        uvflag_cmd = "uvflag flagval=f options=brief vis='"+filename+"' line='channel,110,2430,1,1'"
-        magmo.run_os_cmd(uvflag_cmd)
 
     return []
 

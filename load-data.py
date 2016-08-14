@@ -75,7 +75,7 @@ magmo.ensure_dir_exists(dayDirName)
 
 # Load files
 freqList = ["1421", "1757"]
-ifList = [7, 4]
+ifList = [7, 1]
 restFreqList = ["1.420405752", "1.757"]
 inFilePatterns = ""
 startDatePatterns = 2
