@@ -64,7 +64,7 @@ def flag_data(dirname, day, bandpass_cal, sources):
     """
 
     calibrators = set()
-    calibrators.add(bandpass_cal)
+    # calibrators.add(bandpass_cal) # tvclip seems to make a mess of the bamdpass calibrator
     for src in sources:
         calibrators.add(src["phase_cal"])
     dynamic_flags = get_day_flags(day)
