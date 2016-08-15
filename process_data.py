@@ -40,10 +40,8 @@ def get_day_flags(day):
                     if len(select) > 0:
                         select += ','
                     select += 'ant('+row[3]+')'
-                if len(row[4]) > 0:
-                    if len(select) > 0:
-                        select += ','
-                    select += 'ant('+row[4]+')'
+                    if len(row[4]) > 0:
+                        select += '('+row[4]+')'
                 if len(row[5]) > 0:
                     if len(select) > 0:
                         select += ','
