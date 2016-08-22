@@ -63,7 +63,7 @@ for src in sources:
         if os.path.exists(fits_file):
             fig = aplpy.FITSFigure(fits_file)
             fig.set_theme('publication')
-            fig.show_grayscale(0, None, 0.5)
+            fig.show_grayscale(0, None, 0.25)
             fig.add_colorbar()
             fig.save(img)
             fig.close()
