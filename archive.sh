@@ -8,8 +8,8 @@ archivedir="prev_runs/${daydir}-${today}"
 mkdir ${archivedir}
 mkdir  ${archivedir}/1420
 mkdir  ${archivedir}/1757
-cp ${daydir}/*.html ${archivedir}/
-cp ${daydir}/*.log ${archivedir}/
-cp ${daydir}/*.png* ${archivedir}/
-cp ${daydir}/1420/*.png* ${archivedir}/1420/
-cp ${daydir}/1757/*.png* ${archivedir}/1757/
+cp -a ${daydir}/*.html ${archivedir}/
+cp -a ${daydir}/*.log ${archivedir}/
+cp -a ${daydir}/*.png* ${archivedir}/
+cp -a ${daydir}/1420/*.png* ${archivedir}/1420/
+cp -a ${daydir}/1757/*.png* ${archivedir}/1757/
