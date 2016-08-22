@@ -80,6 +80,10 @@ def flag_data(dirname, day, bandpass_cal, sources):
                 uvflag_cmd += " line='" + flag['line'] + "'"
             magmo.run_os_cmd(uvflag_cmd)
 
+        if filename.endswith('1757'):
+            uvflag_cmd = "uvflag flagval=f options=brief vis='" + filename + "' edge=20,550"
+            magmo.run_os_cmd(uvflag_cmd)
+
     # Clip the data too far away for the mean in the calibrators
     for cal_src in calibrators:
         pattern = dirname + '/' + cal_src + '.[0-9][0-9][0-9][0-9]'
