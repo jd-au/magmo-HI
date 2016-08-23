@@ -62,6 +62,7 @@ def run_os_cmd(cmd, failOnErr=True):
     :return: None
     """
     print ">", cmd
+    sys.stdout.flush()
     try:
         retcode = subprocess.call(cmd, shell=True)
         if retcode != 0:

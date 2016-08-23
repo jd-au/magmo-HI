@@ -97,3 +97,4 @@ ENV/
 .ropeproject
 
 magmo-days-full.csv
+*.def

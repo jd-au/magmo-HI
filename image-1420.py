@@ -7,6 +7,7 @@ import math
 import os
 import process_data
 import sys
+import time
 
 from string import Template
 
@@ -23,6 +24,10 @@ if sources is None or len(sources) == 0:
     exit(1)
 
 dayDirName = "day" + day
+start = time.time()
+print "#### Started imaging MAGMO day %s at %s ####" % \
+      (day, time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start)))
+
 line_band = {'main': '1420', 'freqs': ['1420', '1421', '1420.5'], 'line': True}
 
 error_list = []
@@ -46,6 +51,10 @@ for src in sources:
         if rms > 0:
             sn = max / rms
         sn /= math.sqrt(1053)
+    max_1420 = max
+    restored_img = "1420/magmo-" + src_name + "_1420_restor"
+    if os.path.exists(restored_img):
+        rms_1420, max_1420 = process_data.get_signal_noise_ratio(restored_img)
 
     beam_file = "1757/magmo-" + src_name + "_1757_beam"
     beam_img = beam_file + ".png"
@@ -63,7 +72,8 @@ for src in sources:
         if os.path.exists(fits_file):
             fig = aplpy.FITSFigure(fits_file)
             fig.set_theme('publication')
-            fig.show_grayscale(0, None, 0.25)
+            fig.show_grayscale(0, None, (max_1420 if freq == '1420' else max))
+            # fig.show_grayscale(0, None, 0.1)
             fig.add_colorbar()
             fig.save(img)
             fig.close()
@@ -79,3 +89,7 @@ img_idx.write('</table></body></html>\n')
 img_idx.close()
 os.chdir('..')
 
+# Report
+end = time.time()
+print '#### Processing Completed at %s in %.02f s ####' \
+      % (time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end)), end - start)
