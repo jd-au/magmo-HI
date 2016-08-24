@@ -66,7 +66,6 @@ def flag_data(dirname, day, bandpass_cal, sources):
     for src in sources:
         calibrators.add(src["phase_cal"])
     dynamic_flags = get_day_flags(day)
-    #dynamic_flags = []
     uvDirs = glob.glob(dirname + '/*.[0-9][0-9][0-9][0-9]')
     for filename in uvDirs:
         uvflag_cmd = "uvflag flagval=f options=brief vis='"+filename+"' select='amplitude(500)'"
@@ -76,12 +75,18 @@ def flag_data(dirname, day, bandpass_cal, sources):
             flag_file = flag['uv_file']
             if flag_file is None or len(flag_file) == 0 or filename.endswith(flag_file):
                 uvflag_cmd = "uvflag flagval=f options=brief vis='" + filename + "' "
-                uvflag_cmd += " select='" + flag['select'] + "'"
-                uvflag_cmd += " line='" + flag['line'] + "'"
+                if len(flag['select']) > 0:
+                    uvflag_cmd += " select='" + flag['select'] + "'"
+                if len(flag['line']) > 0:
+                    uvflag_cmd += " line='" + flag['line'] + "'"
             magmo.run_os_cmd(uvflag_cmd)
 
+        # Discard edge channels
         if filename.endswith('1757'):
             uvflag_cmd = "uvflag flagval=f options=brief vis='" + filename + "' edge=20,550"
+            magmo.run_os_cmd(uvflag_cmd)
+        else:
+            uvflag_cmd = "uvflag flagval=f options=brief vis='" + filename + "' edge=200,200"
             magmo.run_os_cmd(uvflag_cmd)
 
     # Clip the data too far away for the mean in the calibrators

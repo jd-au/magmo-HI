@@ -10,6 +10,7 @@ fi
 day=$1
 daydir="day${day}"
 
+date
 echo "Reprocessing day ${day}"
 python clean-data.py ${day}
 
@@ -18,3 +19,6 @@ python process_data.py ${day} >& ${daydir}/process.log
 
 echo "Imaging ... "
 python image-1420.py ${day} >& temp.log
+
+echo "Done"
+date
