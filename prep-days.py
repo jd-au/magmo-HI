@@ -52,13 +52,17 @@ def getFileDateFragments(dayRow):
         days.append(dayDate.isoformat())
     elif dayNum in daysStartAfterEightPmUtc:
         days.append(prevDayDate.isoformat() + "_2")
-        days.append(dayDate.isoformat() + "_[01]")
+        days.append(dayDate.isoformat() + "_0")
+        days.append(dayDate.isoformat() + "_1")
     elif dayNum in daysPrevOnly:
-        days.append(prevDayDate.isoformat() + "_[12]")
+        days.append(prevDayDate.isoformat() + "_1")
+        days.append(prevDayDate.isoformat() + "_2")
     elif dayNum in daysCurrOnlyShort:
-        days.append(dayDate.isoformat() + "_[01]")
+        days.append(dayDate.isoformat() + "_0")
+        days.append(dayDate.isoformat() + "_1")
     else:
-        days.append(prevDayDate.isoformat()+"_[12]")
+        days.append(prevDayDate.isoformat()+"_1")
+        days.append(prevDayDate.isoformat()+"_2")
         days.append(dayDate.isoformat()+"_0")
     return days
 
