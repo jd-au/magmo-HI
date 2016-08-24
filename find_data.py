@@ -8,6 +8,7 @@
 # Date: 6 August, 2016
 
 import magmo
+import os
 import sys
 import time
 # REST requests
@@ -104,15 +105,14 @@ def get_download_urls(obs_ids, opener):
 
 def download_files(urls, session):
     for url in urls:
-        filename = url[url.find('fname')+6:]
+        filename = 'rawdata/' + url[url.find('fname')+6:]
         print 'Downloading file ', filename
-        continue
         r = session.get(url, stream=True)
 
-        with open(filename, 'wb') as fd:
-            for chunk in r.iter_content(chunk_size):
-                fd.write(chunk)
-                print "."
+        if not os.path.exists(filename):
+            with open(filename, 'wb') as fd:
+                for chunk in r.iter_content(chunk_size):
+                    fd.write(chunk)
 
 
 def main():
@@ -150,7 +150,7 @@ def main():
 
     # Report
     end = time.time()
-    print '#### Finding completed at %s ####' \
+    print '#### File retrieval completed at %s ####' \
           % (time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end)))
     print 'Processed in %.02f s' % (end - start)
     exit(0)
