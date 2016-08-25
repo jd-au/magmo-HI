@@ -1,6 +1,6 @@
 # Script to query ATOA to find the RPFITS files representing a day's observations.
 # Each file is then downloaded.
-# Note in the future, an interfsce will be provided in ATOA to allow a list of file
+# Note in the future, an interface will be provided in ATOA to allow a list of file
 # urls which do not require login to be downloaded and then used in a tool such as
 # wget,
 
@@ -26,10 +26,8 @@ atoa_login_url = 'http://atoa.atnf.csiro.au/login'
 atoa_download_service = 'http://atoa.atnf.csiro.au/listDownload.jsp'
 obs_prog_id = 'C2291'
 
-chunk_size = 4*1024 # bytes
-
-
-# http://horus.atnf.csiro.au:8081/atoavo/tap/sync?request=doQuery&lang=ADQL&format=votable&query=select+*+from+ivoa.obscore
+# Block size to be read at a time in bytes
+chunk_size = 4*1024
 
 
 def adql_query(url, query_string, filename, username=None, password=None, file_write_mode='w'):
@@ -119,13 +117,14 @@ def main():
     # Read day parameter
     if len(sys.argv) < 3 or len(sys.argv) > 4:
         print("Incorrect number of parameters.")
-        print("Usage: python find_data.py day userid [password]")
+        print("Usage: python find_data.py day userid [passwordfile]")
         exit(1)
     day = sys.argv[1]
     userid = sys.argv[2]
     password = None
     if len(sys.argv) > 3:
-        password = sys.argv[3]
+        with open(sys.argv[3], 'r') as fd:
+            password = fd.readlines().strip()
     else:
         password = getpass.getpass("Enter your OPAL password: ")
 
