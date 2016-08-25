@@ -87,7 +87,8 @@ def login_to_atoa(userid, password):
 
     # Authenticate
     r = session.post(atoa_login_url, data=login_data)
-    print r.headers
+    if r.status_code != 200:
+        print r.headers
     return session
 
 
@@ -104,10 +105,12 @@ def get_download_urls(obs_ids, opener):
 def download_files(urls, session):
     for url in urls:
         filename = 'rawdata/' + url[url.find('fname')+6:]
-        print 'Downloading file ', filename
-        r = session.get(url, stream=True)
 
-        if not os.path.exists(filename):
+        if os.path.exists(filename):
+            print 'Skipping existing file ', filename
+        else:
+            print 'Downloading file ', filename
+            r = session.get(url, stream=True)
             with open(filename, 'wb') as fd:
                 for chunk in r.iter_content(chunk_size):
                     fd.write(chunk)
@@ -124,7 +127,7 @@ def main():
     password = None
     if len(sys.argv) > 3:
         with open(sys.argv[3], 'r') as fd:
-            password = fd.readlines().strip()
+            password = fd.readlines()[0].strip()
     else:
         password = getpass.getpass("Enter your OPAL password: ")
 
