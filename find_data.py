@@ -23,7 +23,8 @@ import requests
 # Constants
 atoa_tap_url = 'http://atoavo.atnf.csiro.au/tap/sync'
 atoa_login_url = 'http://atoa.atnf.csiro.au/login'
-atoa_download_service = 'http://atoa.atnf.csiro.au/listDownload.jsp'
+#atoa_download_service = 'http://atoa.atnf.csiro.au/listDownload.jsp'
+atoa_download_service = 'http://atoa.atnf.csiro.au/RPFITS'
 obs_prog_id = 'C2291'
 
 # Block size to be read at a time in bytes
@@ -47,7 +48,7 @@ def adql_query(url, query_string, filename, username=None, password=None, file_w
 
 def query_atoa(day_row):
     obs_ids = []
-    base_query = "SELECT distinct access_url " \
+    base_query = "SELECT distinct obs_id, access_url " \
                  + "FROM ivoa.obscore where obs_collection = 'C2291' " +\
                    "and frequency in (1421.0, 1420.5) and data_flag < 999 "
 
@@ -66,7 +67,8 @@ def query_atoa(day_row):
     result_votable = votable.parse(temp_file, pedantic=False)
     results = result_votable.get_first_table().array
     for row in results:
-        obs_id = row['access_url']
+        #obs_id = row['access_url']
+        obs_id = row['obs_id']
         # print obs_id
         if obs_id is not None:
             obs_ids.append(obs_id)
@@ -92,13 +94,17 @@ def login_to_atoa(userid, password):
     return session
 
 
-def get_download_urls(obs_ids, opener):
+def get_download_urls(obs_ids, session):
     data = ''
     for id in obs_ids:
         data += id + '\n'
-    form_data = urllib.urlencode({'filelist': data, 'bundle':'textlist'})
-    resp = opener.open(atoa_download_service, form_data)
-    urls = resp.read()
+    print data
+    form_data = {'filelist': data, 'bundle': 'textlist'}
+    r = session.post(atoa_download_service, data=form_data)
+    urls = r.text
+
+    #resp = opener.open(atoa_download_service, form_data)
+    #urls = resp.read()
     return urls
 
 
@@ -145,14 +151,19 @@ def main():
     obs_ids = query_atoa(day_row)
 
     session = login_to_atoa(userid, password)
-    download_files(obs_ids, session)
-    #urls = get_download_urls(obs_ids, opener)
-    #print urls
+    #download_files(obs_ids, session)
+    urls = get_download_urls(obs_ids, session)
+
+    url_filename = 'filelist/day' + day + '.txt'
+    with open(url_filename, 'wb') as uf:
+        uf.write(urls)
+
+    print "Urls written to %s " % (url_filename)
 
 
     # Report
     end = time.time()
-    print '#### File retrieval completed at %s ####' \
+    print '#### File discovery completed at %s ####' \
           % (time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end)))
     print 'Processed in %.02f s' % (end - start)
     exit(0)
