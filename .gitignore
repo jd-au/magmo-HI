@@ -98,3 +98,5 @@ ENV/
 
 magmo-days-full.csv
 *.def
+filelist
+.credentials

@@ -23,8 +23,8 @@ import requests
 # Constants
 atoa_tap_url = 'http://atoavo.atnf.csiro.au/tap/sync'
 atoa_login_url = 'http://atoa.atnf.csiro.au/login'
-#atoa_download_service = 'http://atoa.atnf.csiro.au/listDownload.jsp'
 atoa_download_service = 'http://atoa.atnf.csiro.au/RPFITS'
+
 obs_prog_id = 'C2291'
 
 # Block size to be read at a time in bytes
@@ -32,7 +32,17 @@ chunk_size = 4*1024
 
 
 def adql_query(url, query_string, filename, username=None, password=None, file_write_mode='w'):
-    """ Do an adql query, and write the resulting VO Table to a file """
+    """
+    Run an ADQL query and write the resulting VO Table to a file.
+
+    :param url: The url of the sync endpoint of the TAP service
+    :param query_string: The ADQL query to be run
+    :param filename: The name of the file where the result is to be saved in votable format.
+    :param username: The username to use, if authentication is needed
+    :param password: The password to use, if authentication is needed
+    :param file_write_mode: The write mode to be used when opening the output file.
+    :return: None
+    """
     req = urllib2.Request(url)
     # Uses basic auth to securely access the data access information for the image cube
     if username is not None:
@@ -41,12 +51,21 @@ def adql_query(url, query_string, filename, username=None, password=None, file_w
     data = urllib.urlencode({'query':query_string, 'request':'doQuery', 'lang':'ADQL', 'format':'votable'})
     u = urllib2.urlopen(req, data)
     queryResult = u.read()
+    # Short term workaround for the field type being incorrect
     queryResult = re.sub('character varying\([0-9]+\)', 'char" arraysize="*', queryResult)
     with open(filename,file_write_mode) as f:
         f.write(queryResult)
 
 
 def query_atoa(day_row):
+    """
+    Build and run an ADQL query to retrieve the list of a day's MAGMO observations
+    from ATOA. This is restricted to only the files with HI data. The query result
+     will be stored in a temp directory in the current working directory.
+
+    :param day_row: The config row for the day, this defines the filename patterns
+    :return: A list of the obs_id values for the day's observations.
+    """
     obs_ids = []
     base_query = "SELECT distinct obs_id, access_url " \
                  + "FROM ivoa.obscore where obs_collection = 'C2291' " +\
@@ -77,6 +96,13 @@ def query_atoa(day_row):
 
 
 def login_to_atoa(userid, password):
+    """
+    Establish an authenticated session with the ATOA web server.
+
+    :param userid: The OPAL user id to be used.
+    :param password: The OPAL password to be used.
+    :return: The session to be used for future authenticated interaction with ATOA.
+    """
     session = requests.session()
 
     # This is the form data that the page sends when logging in
@@ -95,6 +121,14 @@ def login_to_atoa(userid, password):
 
 
 def get_download_urls(obs_ids, session):
+    """
+    Retrieve a list of URLs which can be used to download the listed observations.
+    The URLs can then be used in standard download tools such as wget.
+
+    :param obs_ids: The ids of the observations which are to be retrieved.
+    :param session: The authenticated ATOA web session.
+    :return: A list of URLs, one for reach observation.
+    """
     data = ''
     for id in obs_ids:
         data += id + '\n'
@@ -103,12 +137,21 @@ def get_download_urls(obs_ids, session):
     r = session.post(atoa_download_service, data=form_data)
     urls = r.text
 
-    #resp = opener.open(atoa_download_service, form_data)
-    #urls = resp.read()
     return urls
 
 
 def download_files(urls, session):
+    """
+    Download a set of observation files from ATOA. This may be the access_url
+    values for the observation whcih require use of an authenticated session,
+    or the download URLs which do not require further authentication. Note
+    that downloading via tools such as wget using the pre-authenticated URLs
+    will generally be much faster than using this method.
+
+    :param urls: The URLs of the observations.
+    :param session: The authenticated web session with ATOA.
+    :return: None
+    """
     for url in urls:
         filename = 'rawdata/' + url[url.find('fname')+6:]
 
@@ -123,7 +166,7 @@ def download_files(urls, session):
 
 
 def main():
-    # Read day parameter
+    # Read input parameters
     if len(sys.argv) < 3 or len(sys.argv) > 4:
         print("Incorrect number of parameters.")
         print("Usage: python find_data.py day userid [passwordfile]")
