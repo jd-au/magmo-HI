@@ -12,7 +12,7 @@ import datetime
 from dateutil.relativedelta import relativedelta
 
 # metadata
-daysStartPostUtcDay = [1, 2, 3, 4, 5, 6, 42]
+daysStartPostUtcDay = [1, 2, 3, 4, 5, 6, 41, 42]
 daysStartAfterEightPmUtc = [7, 22, 23, 24]
 daysPrevOnly = [31]
 daysCurrOnlyShort = [43]
@@ -53,7 +53,8 @@ def getFileDateFragments(dayRow):
     elif dayNum in daysStartAfterEightPmUtc:
         days.append(prevDayDate.isoformat() + "_2")
         days.append(dayDate.isoformat() + "_0")
-        days.append(dayDate.isoformat() + "_1")
+        if dayNum != 7:
+            days.append(dayDate.isoformat() + "_1")
     elif dayNum in daysPrevOnly:
         days.append(prevDayDate.isoformat() + "_1")
         days.append(prevDayDate.isoformat() + "_2")
