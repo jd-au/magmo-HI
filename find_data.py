@@ -28,7 +28,7 @@ atoa_download_service = 'http://atoa.atnf.csiro.au/RPFITS'
 obs_prog_id = 'C2291'
 
 # Block size to be read at a time in bytes
-chunk_size = 4*1024
+chunk_size = 4 * 1024
 
 
 def adql_query(url, query_string, filename, username=None, password=None, file_write_mode='w'):
@@ -48,12 +48,12 @@ def adql_query(url, query_string, filename, username=None, password=None, file_w
     if username is not None:
         base64string = base64.encodestring('%s:%s' % (username, password)).replace('\n', '')
         req.add_header("Authorization", "Basic %s" % base64string)
-    data = urllib.urlencode({'query':query_string, 'request':'doQuery', 'lang':'ADQL', 'format':'votable'})
+    data = urllib.urlencode({'query': query_string, 'request': 'doQuery', 'lang': 'ADQL', 'format': 'votable'})
     u = urllib2.urlopen(req, data)
     queryResult = u.read()
     # Short term workaround for the field type being incorrect
     queryResult = re.sub('character varying\([0-9]+\)', 'char" arraysize="*', queryResult)
-    with open(filename,file_write_mode) as f:
+    with open(filename, file_write_mode) as f:
         f.write(queryResult)
 
 
@@ -68,14 +68,14 @@ def query_atoa(day_row):
     """
     obs_ids = []
     base_query = "SELECT distinct obs_id, access_url " \
-                 + "FROM ivoa.obscore where obs_collection = 'C2291' " +\
-                   "and frequency in (1421.0, 1420.5) and data_flag < 999 "
+                 + "FROM ivoa.obscore where obs_collection = 'C2291' " + \
+                 "and frequency in (1421.0, 1420.5) and data_flag < 999 "
 
     temp_dir = 'temp'
     magmo.ensure_dir_exists(temp_dir)
     temp_file = temp_dir + "/query-result.xml"
     day_select = ' and ('
-    for i in range(2,len(day_row)):
+    for i in range(2, len(day_row)):
         if i > 2:
             day_select += ' or '
         day_select += "obs_id like '" + day_row[i] + "%." + obs_prog_id + "'"
@@ -86,13 +86,38 @@ def query_atoa(day_row):
     result_votable = votable.parse(temp_file, pedantic=False)
     results = result_votable.get_first_table().array
     for row in results:
-        #obs_id = row['access_url']
+        # obs_id = row['access_url']
         obs_id = row['obs_id']
         # print obs_id
         if obs_id is not None:
             obs_ids.append(obs_id)
 
     return obs_ids
+
+
+def is_obs_cal_only(obs_id):
+    """
+    Identify if the supplied observation is an observatio of a single bandpass
+    calibration. Where these occur at the start of an observing run they may be
+    junk data recording the pahse adjustment process.
+    :param obs_id: The id of the observation to be checked.
+    :return: True if the observation file only includes a single cal source, False otherwise
+    """
+    query = """select obs_id
+        from ivoa.obscore
+        where obs_collection = '{0}' and obs_id = '{1}'
+        group by obs_id
+        having count(distinct target_name) = 1
+        and min(target_name) in ('1934-638', '0823-500')""".format(obs_prog_id, obs_id)
+
+    temp_dir = 'temp'
+    magmo.ensure_dir_exists(temp_dir)
+    temp_file = temp_dir + "/cal-result.xml"
+    adql_query(atoa_tap_url, query, temp_file)
+
+    result_votable = votable.parse(temp_file, pedantic=False)
+    result = result_votable.get_first_table().array
+    return len(result) > 0
 
 
 def login_to_atoa(userid, password):
@@ -153,7 +178,7 @@ def download_files(urls, session):
     :return: None
     """
     for url in urls:
-        filename = 'rawdata/' + url[url.find('fname')+6:]
+        filename = 'rawdata/' + url[url.find('fname') + 6:]
 
         if os.path.exists(filename):
             print 'Skipping existing file ', filename
@@ -192,9 +217,12 @@ def main():
 
     # Query ATOA for desired ids
     obs_ids = query_atoa(day_row)
+    if len(obs_ids) > 0 and is_obs_cal_only(obs_ids[0]):
+        print "Ignoring cal only first obs: ", obs_ids[0]
+        obs_ids = obs_ids[1:]
 
     session = login_to_atoa(userid, password)
-    #download_files(obs_ids, session)
+    # download_files(obs_ids, session)
     urls = get_download_urls(obs_ids, session)
 
     url_filename = 'filelist/day' + day + '.txt'
@@ -202,7 +230,6 @@ def main():
         uf.write(urls)
 
     print "Urls written to %s " % (url_filename)
-
 
     # Report
     end = time.time()
