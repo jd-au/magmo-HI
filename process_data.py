@@ -17,9 +17,11 @@ import re
 import subprocess
 import sys
 import time
+import numpy as np
+from collections import OrderedDict
 
 from string import Template
-
+from astropy.io import ascii
 
 def get_day_flags(day):
     """
@@ -327,6 +329,12 @@ def find_strong_sources(day_dir_name, freq, sources, num_chan, min_sn):
     :return: A list of the source names filtered to just those with bright sources
     """
     strong_sources = []
+    src_names = []
+    src_rms = np.zeros(len(sources))
+    src_max = np.zeros(len(sources))
+    src_sn = np.zeros(len(sources))
+
+    i = 0
     for src in sources:
         src_name = src['source']
         restored_img = day_dir_name + "/" + freq + "/magmo-" + src_name + "_" + freq + "_restor"
@@ -338,6 +346,14 @@ def find_strong_sources(day_dir_name, freq, sources, num_chan, min_sn):
             sn = sn / math.sqrt(num_chan)
             if sn > min_sn:
                 strong_sources.append(src)
+        src_names.append(src_name)
+        src_rms[i] = rms
+        src_max[i] = max
+        src_sn[i] = sn
+        i += 1
+
+    table = OrderedDict([('name', src_names), ('rms', src_rms), ('max', src_max), ('s/n', src_sn)])
+    ascii.write(table, day_dir_name+'/stats.dat', format='fixed_width', bookend=False, delimiter=None)
 
     return strong_sources
 
