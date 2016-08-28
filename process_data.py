@@ -343,7 +343,7 @@ def find_strong_sources(day_dir_name, freq, sources, num_chan, min_sn):
             sn = 0
             if rms > 0:
                 sn = max / rms
-            sn = sn / math.sqrt(num_chan)
+            sn /= math.sqrt(num_chan)
             if sn > min_sn:
                 strong_sources.append(src)
         src_names.append(src_name)
@@ -352,8 +352,13 @@ def find_strong_sources(day_dir_name, freq, sources, num_chan, min_sn):
         src_sn[i] = sn
         i += 1
 
-    table = OrderedDict([('name', src_names), ('rms', src_rms), ('max', src_max), ('s/n', src_sn)])
-    ascii.write(table, day_dir_name+'/stats.dat', format='fixed_width', bookend=False, delimiter=None)
+    with open(day_dir_name+'/stats.csv', "wb") as stats:
+        writer = csv.writer(stats, quoting=csv.QUOTE_NONNUMERIC)
+        writer.writerow(["name", "rms", "max", "sn"])
+        for i in range(0, len(src_names)):
+            writer.writerow([src_names[i], src_rms[i], src_max[i], src_sn[i]])
+    #table = OrderedDict([('name', src_names), ('rms', src_rms), ('max', src_max), ('s/n', src_sn)])
+    #ascii.write(table, day_dir_name+'/stats.dat', format='fixed_width', bookend=False, delimiter=None, quotechar='"')
 
     return strong_sources
 
