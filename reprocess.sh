@@ -20,5 +20,11 @@ python process_data.py ${day} >& ${daydir}/process.log
 echo "Imaging ... "
 python image-1420.py ${day} >& temp.log
 
+echo "Analysing ... "
+python analyse_data.py ${day} >& ${daydir}/analyse.log
+
+echo "Archiving ..."
+./archive.sh ${day}
+
 echo "Done"
 date
