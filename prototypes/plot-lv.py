@@ -23,7 +23,7 @@ def readData():
     y = []
     c = []
 
-    voFiles = glob.glob('./*.votable.xml')
+    voFiles = glob.glob('day*/*.votable.xml')
     for filename in voFiles:
         print 'Reading', filename
         votable = parse(filename, pedantic=False)
@@ -37,10 +37,11 @@ def readData():
             if gal_info is None:
                 print "No longitude provided for %s, skipping" % filename
                 continue
-            gal_long = int(float(gal_info.value))
+            gal_long = float(gal_info.value)
             if gal_long > 180:
                 gal_long -= 360
             results_array = results.tables[0].array
+            #print gal_long
             for row in results_array:
                 x.append(gal_long)
                 y.append(row['velocity'])
@@ -55,9 +56,11 @@ def plot(x, y, c, filename):
     ymin = -100
     ymax = 100
 
+    val = np.clip(c, 0, 1)
+    print val
     # plt.subplots_adjust(hspace=0.5)
     plt.subplot(111, axisbg='black')
-    plt.hexbin(x, y, c, cmap=plt.cm.gist_heat_r)
+    plt.hexbin(x, y, val, cmap=plt.cm.gist_heat_r)
     # plt.scatter(x, y, cmap=plt.cm.YlOrRd_r)
     plt.axis([xmax, xmin, ymin, ymax])
     plt.title("Longitude-Velocity")
