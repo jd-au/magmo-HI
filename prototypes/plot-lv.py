@@ -44,7 +44,7 @@ def readData():
             #print gal_long
             for row in results_array:
                 x.append(gal_long)
-                y.append(row['velocity'])
+                y.append(row['velocity']/1000.0) # Convert from m/s to km/s
                 c.append(row['opacity'])
             #print results_array
 
@@ -53,10 +53,10 @@ def readData():
 def plot(x, y, c, filename):
     xmin=-180
     xmax = 180
-    ymin = -100
-    ymax = 100
+    ymin = -300
+    ymax = 300
 
-    val = np.clip(c, 0, 1)
+    val = np.clip(c, -0.005, 1.05)
     print val
     # plt.subplots_adjust(hspace=0.5)
     plt.subplot(111, axisbg='black')
