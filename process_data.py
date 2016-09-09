@@ -346,11 +346,11 @@ def find_strong_sources(day_dir_name, freq, sources, num_chan, min_sn):
             sn /= math.sqrt(num_chan)
             if sn > min_sn:
                 strong_sources.append(src)
-        src_names.append(src_name)
-        src_rms[i] = rms
-        src_max[i] = max
-        src_sn[i] = sn
-        i += 1
+            src_names.append(src_name)
+            src_rms[i] = rms
+            src_max[i] = max
+            src_sn[i] = sn
+            i += 1
 
     with open(day_dir_name+'/stats.csv', "wb") as stats:
         writer = csv.writer(stats, quoting=csv.QUOTE_NONNUMERIC)
@@ -398,8 +398,8 @@ def build_cubes(day_dir_name, sources, band):
             beam_file = name_prefix + 'sl_beam'
             restored_file = name_prefix + 'sl_restor'
             fits_file = restored_file + '.fits'
-            line = 'felocity,1053,-250.0,0.4,0.4'
-            #line = 'felocity,793,-225.0,0.4,0.4'
+            line = 'felocity,627,-250.0,0.8,0.8'
+            #line = 'felocity,1053,-250.0,0.4,0.4'
 
             cmd = 'uvaver line=' + line + ' vis=' + src_file + ' out=' + ave_file
             magmo.run_os_cmd(cmd)
