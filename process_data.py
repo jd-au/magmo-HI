@@ -150,7 +150,7 @@ def calibrate(dirname, bandpass_cal, sources, band_list, day):
 
     # Setup te index file
     cal_idx = open(dirname + '/calibration.html', 'w')
-    t = Template('<html>\n<head><title>Calibration results for day $day</title></head>\n'
+    t = Template('<html>\n<head><title>Day $day calibration</title></head>\n'
                  + '<body>\n<h1>Calibration results for day $day</h1>\n<table>')
     cal_idx.write(t.substitute(day=day))
 
@@ -454,7 +454,7 @@ def main():
 
     # set up map of parent/child map of frequencies
     line_band = {'main': '1420', 'freqs': ['1420', '1421', '1420.5'], 'line': True}
-    cont_band = {'main': '1757', 'freqs': ['1757', '1721', '1720', '1720.5'], 'line': False}
+    cont_band = {'main': '1757', 'freqs': ['1757'], 'line': False}
     band_list = [line_band, cont_band]
     for band in band_list:
         freq = band['main']

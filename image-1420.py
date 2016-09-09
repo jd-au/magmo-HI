@@ -35,7 +35,7 @@ error_list = []
 error_list.extend(process_data.build_images(dayDirName, sources, line_band, day))
 
 img_idx = open(dayDirName + '/images-comp.html', 'w')
-t = Template('<html>\n<head><title>Image previews for day $day</title></head>\n'
+t = Template('<html>\n<head><title>Day $day image previews</title></head>\n'
              + '<body>\n<h1>Image previews for day $day</h1>\n<table>\n'
              + '<tr><td>Source</td><td>1757 MHz</td><td>1420 MHz</td><td>1757 Beam</td></tr>')
 img_idx.write(t.substitute(day=day))
