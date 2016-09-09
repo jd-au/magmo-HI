@@ -33,11 +33,15 @@ for band in ['1420', '1757']:
         os.system("rm -r *.fits")
         os.system("rm -r *.png")
         os.system("rm -r *.png_2")
-        os.system("rm -r *.vot")
-        os.system("rm -r *.xml")
         os.system("rm -r *.pdf")
         os.chdir('..')
 
+# Delete the analysis files
+os.system("rm *.vot")
+os.system("rm *.xml")
+os.system("rm *.png")
+os.system("rm *.png_2")
+os.system("rm *.pdf")
 os.chdir('..')
 
 # Copy from the backups back to the orignal files
