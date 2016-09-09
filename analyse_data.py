@@ -20,7 +20,7 @@ from string import Template
 
 
 sn_min = 1.3
-num_chan = 1053
+num_chan = 627
 
 
 def get_high_signal_fields(day_dir_name):
@@ -85,11 +85,11 @@ def read_sources(filename):
         sn = flux / rms
         print "Found source %s at %.4f, %.4f with flux %.4f and rms of %.4f giving S/N of %.4f" % \
               (id, ra, dec, flux, rms, sn)
-        if (sn > 10):
-            sources.append([ra, dec, id])
+        if sn > 10 and flux > 0.01:
+            sources.append([ra, dec, id, flux])
         else:
-            print "Ignoring source at %.4f, %.4f due to low S/N of %.4f" % \
-                  (ra, dec, sn)
+            print "Ignoring source at %.4f, %.4f due to low S/N of %.4f or flux of %.4f" % \
+                  (ra, dec, sn, flux)
 
     return sources
 
@@ -101,6 +101,12 @@ def extract_spectra(daydirname, field):
     src_filename = "{0}/{1}_src_comp.vot".format(daydirname, field)
 
     spectra = dict()
+    source_ids = dict()
+    if not os.path.exists(fits_filename):
+        print "Warning: File %s does not exist, skipping extraction." % \
+              fits_filename
+        return spectra, source_ids
+
     sources = read_sources(src_filename)
     hdulist = fits.open(fits_filename)
     image = hdulist[0].data
@@ -125,11 +131,12 @@ def extract_spectra(daydirname, field):
             names='plane,velocity,flux')
         c = SkyCoord(src[0], src[1], frame='icrs', unit="deg")
         spectra[c.galactic.l] = spectrum_array
+        source_ids[c.galactic.l] = [src[2], src[3]]
     del image
     del header
     hdulist.close()
 
-    return spectra
+    return spectra, source_ids
 
 
 def get_mean_continuum(spectrum):
@@ -206,33 +213,37 @@ def output_spectra(spectrum, opacity, filename, longitude):
 def produce_spectra(day_dir_name, day, field_list):
     with open(day_dir_name + '/spectra.html', 'w') as spectra_idx:
         t = Template(
-            '<html>\n<head><title>Spectra previews for day $day</title></head>\n'
-            + '<body>\n<h1>Spectra previews for day $day</h1>\n<table>\n'
-            + '<tr><td>Field</td><td>Source</td><td>Spectra</td></tr>')
+            '<html>\n<head><title>D$day Spectra</title></head>\n'
+            + '<body>\n<h1>Spectra previews for day $day</h1>\n<table>\n')
         spectra_idx.write(t.substitute(day=day))
 
         for field in field_list:
-            spectra = extract_spectra(day_dir_name, field)
-            #print spectra
+            spectra, source_ids = extract_spectra(day_dir_name, field)
+            t = Template('<tr><td colspan=4><b>Field: ${field}</b></td></tr>\n' +
+                         '<tr><td>Image Name</td><td> Source Longitude </td>' +
+                         '<td>Peak Flux</td><td>Spectra</td></tr>\n')
+            spectra_idx.write(t.substitute(field=field))
+
             idx = 0
             for longitude in spectra.keys():
                 spectrum = spectra.get(longitude)
+                src_data = source_ids.get(longitude)
                 idx += 1
                 mean = get_mean_continuum(spectrum)
                 print 'Continuum mean is %.5f Jy' % (mean)
                 opacity = get_opacity(spectrum, mean)
                 # print opacity
-                name_prefix = field + '_' + str(idx)
+                name_prefix = field + '_src' + src_data[0]
                 dir_prefix = day_dir_name + "/"
                 img_name = name_prefix + "_plot.png"
                 plot_spectrum(spectrum.velocity, opacity, dir_prefix + img_name)
                 filename = dir_prefix + name_prefix + '_opacity.votable.xml'
                 output_spectra(spectrum, opacity, filename, longitude)
 
-                t = Template('<tr><td>${field}</td><td>${longitude}</td>' +
-                             '<td><a href="${img}"><img src="${img}" ' +
-                             'width="500px"></a></td></tr>')
-                spectra_idx.write(t.substitute(img=img_name, field=field,
+                t = Template('<tr><td>${img}</td><td>${longitude}</td>' +
+                             '<td>${peak_flux}</td><td><a href="${img}">' +
+                             '<img src="${img}" width="500px"></a></td></tr>\n')
+                spectra_idx.write(t.substitute(img=img_name, peak_flux=src_data[1],
                                                longitude=longitude))
 
         spectra_idx.write('</table></body></html>\n')
