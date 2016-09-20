@@ -48,7 +48,7 @@ def readData():
                 x.append(gal_long)
                 y.append(row['velocity']/1000.0) # Convert from m/s to km/s
                 opacity = row['opacity']
-                c.append()
+                c.append(opacity)
                 if opacity > 6 or opacity < -6:
                     poorSN = True
             if poorSN:
