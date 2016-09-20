@@ -23,8 +23,9 @@ def readData():
     y = []
     c = []
 
+    badSpectra = 0
     voFiles = glob.glob('day*/*.votable.xml')
-    for filename in voFiles:
+    for filename in sorted(voFiles):
         print 'Reading', filename
         votable = parse(filename, pedantic=False)
         results = next(resource for resource in votable.resources if resource.type == "results")
@@ -41,13 +42,21 @@ def readData():
             if gal_long > 180:
                 gal_long -= 360
             results_array = results.tables[0].array
+            poorSN = False
             #print gal_long
             for row in results_array:
                 x.append(gal_long)
                 y.append(row['velocity']/1000.0) # Convert from m/s to km/s
-                c.append(row['opacity'])
+                opacity = row['opacity']
+                c.append()
+                if opacity > 6 or opacity < -6:
+                    poorSN = True
+            if poorSN:
+                badSpectra += 1
             #print results_array
 
+    print "Read %d spectra of which %d had poor S/N." % (
+        len(voFiles), badSpectra)
     return x, y, c
 
 def plot(x, y, c, filename):
