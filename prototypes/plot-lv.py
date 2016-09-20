@@ -10,6 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import glob
 
+
 def createSampleData():
     np.random.seed(0)
     n = 10000
@@ -17,6 +18,7 @@ def createSampleData():
     y = np.random.random(n) * 100/180 * (180 - np.abs(x)) * (-x/abs(x))
     c = 1 - (np.random.random(n) * ((180 - np.abs(x)) / 180) )#* ((100 - np.abs(y))/100))
     return x, y, c
+
 
 def readData():
     x = []
@@ -49,15 +51,16 @@ def readData():
                 y.append(row['velocity']/1000.0) # Convert from m/s to km/s
                 opacity = row['opacity']
                 c.append(opacity)
-                if opacity > 6 or opacity < -6:
+                if opacity > 10 or opacity < -15:
                     poorSN = True
             if poorSN:
                 badSpectra += 1
             #print results_array
 
-    print "Read %d spectra of which %d had poor S/N." % (
-        len(voFiles), badSpectra)
+    print "Read %d spectra of which %d had reasonable S/N." % (
+        len(voFiles), len(voFiles)-badSpectra)
     return x, y, c
+
 
 def plot(x, y, c, filename):
     xmin=-180
