@@ -85,7 +85,7 @@ def read_sources(filename):
         sn = flux / rms
         print "Found source %s at %.4f, %.4f with flux %.4f and rms of %.4f giving S/N of %.4f" % \
               (id, ra, dec, flux, rms, sn)
-        if sn > 10 and flux > 0.01:
+        if sn > 10 and flux > 0.02:
             sources.append([ra, dec, id, flux])
         else:
             print "Ignoring source at %.4f, %.4f due to low S/N of %.4f or flux of %.4f" % \
@@ -171,7 +171,7 @@ def get_opacity(spectrum, mean):
     return spectrum.flux/mean
 
 
-def plot_spectrum(x, y, filename):
+def plot_spectrum(x, y, filename, title):
     """
     Output a plot of opacity vs LSR velocity to a specified file.
 
@@ -186,6 +186,7 @@ def plot_spectrum(x, y, filename):
 
     plt.xlabel(r'Velocity relative to LSR (km/s)')
     plt.ylabel(r'$e^{(-\tau)}$')
+    plt.title(title)
     plt.grid(True)
     plt.savefig(filename)
     #plt.show()
@@ -236,7 +237,9 @@ def produce_spectra(day_dir_name, day, field_list):
                 name_prefix = field + '_src' + src_data[0]
                 dir_prefix = day_dir_name + "/"
                 img_name = name_prefix + "_plot.png"
-                plot_spectrum(spectrum.velocity, opacity, dir_prefix + img_name)
+                plot_spectrum(spectrum.velocity, opacity, dir_prefix + img_name,
+                              "Spectra for source {0} in field {1}".format(
+                                  src_data[0], field))
                 filename = dir_prefix + name_prefix + '_opacity.votable.xml'
                 output_spectra(spectrum, opacity, filename, longitude)
 
