@@ -25,9 +25,11 @@ def readData():
     y = []
     c = []
 
-    badSpectra = 0
-    voFiles = glob.glob('day*/*.votable.xml')
-    for filename in sorted(voFiles):
+    bad_spectra = 0
+    prev_field = ''
+    num_fields = 0
+    vo_files = glob.glob('day*/*.votable.xml')
+    for filename in sorted(vo_files):
         print 'Reading', filename
         votable = parse(filename, pedantic=False)
         results = next(resource for resource in votable.resources if resource.type == "results")
@@ -44,7 +46,7 @@ def readData():
             if gal_long > 180:
                 gal_long -= 360
             results_array = results.tables[0].array
-            poorSN = False
+            poor_sn = False
             #print gal_long
             for row in results_array:
                 x.append(gal_long)
@@ -52,13 +54,16 @@ def readData():
                 opacity = row['opacity']
                 c.append(opacity)
                 if opacity > 10 or opacity < -15:
-                    poorSN = True
-            if poorSN:
-                badSpectra += 1
-            #print results_array
+                    poor_sn = True
+            if poor_sn:
+                bad_spectra += 1
+            field = filename.split('_')
+            if field[0] != prev_field:
+                prev_field = field[0]
+                num_fields += 1
 
-    print "Read %d spectra of which %d had reasonable S/N." % (
-        len(voFiles), len(voFiles)-badSpectra)
+    print "In %d fields read %d spectra of which %d had reasonable S/N. " % (
+        num_fields, len(vo_files), len(vo_files)-bad_spectra)
     return x, y, c
 
 
@@ -69,7 +74,8 @@ def plot(x, y, c, filename):
     ymax = 300
 
     val = np.clip(c, -0.005, 1.05)
-    print val
+    #print val
+    fig = plt.figure(1, (12,6))
     # plt.subplots_adjust(hspace=0.5)
     plt.subplot(111, axisbg='black')
     plt.hexbin(x, y, val, cmap=plt.cm.gist_heat_r)
@@ -89,6 +95,7 @@ def plot(x, y, c, filename):
     #cb.set_label('log10(N)')
 
     plt.savefig(filename)
+
     # plt.show()
     return
 
