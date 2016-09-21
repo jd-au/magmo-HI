@@ -23,6 +23,10 @@ from collections import OrderedDict
 from string import Template
 from astropy.io import ascii
 
+sn_min = 1.3
+num_chan = 627
+
+
 def get_day_flags(day):
     """
     Read the magmo-flagging.csv file and find the flagging needed for the requested day.
@@ -53,13 +57,57 @@ def get_day_flags(day):
     return flags
 
 
+def find_zero_hi_plane(dirname, bandpass_cal):
+    """
+    Determine the plane containing the 0 km/s HI line for the bandpass
+    calibrator. This can then be used as the basis for flaging out the local
+    HI absorbtion in the bandpass cal.
+
+    :param dirname: The name of the day directory
+    :param bandpass_cal: The source name of the bandpass calibrator
+    :return: The integer plane (aka line)  number of the zero km/s plane.
+    """
+    cal_file = "{0}/{1}.1420".format(dirname, bandpass_cal)
+    result = subprocess.check_output(
+        ["uvlist", "vis=" + cal_file, "options=spectral"])
+    opt_vel_next = False
+    vel_start = 0.0
+    vel_end = 0.0
+    vel_step = 0.0
+    for line in result.splitlines():
+        print line
+        if opt_vel_next:
+            stats = line.strip().split(':')
+            if len(stats) > 1:
+                if stats[0].strip().startswith('Start velocity'):
+                    vel_start = float(stats[1])
+                if stats[0].strip().startswith('End velocity'):
+                    vel_end = float(stats[1])
+                if stats[0].strip().startswith('Velocity'):
+                    vel_step = float(stats[1])
+        elif re.match('^Optical Velocities:', line):
+            opt_vel_next = True
+
+    if vel_step != 0.0:
+        # print vel_start, vel_end, vel_step
+        plane = int(vel_start / vel_step * -1.0)
+        return plane
+    else:
+        print "Unable to find Optical Velocity data in:"
+        print result
+        return None
+
+
 def flag_data(dirname, day, bandpass_cal, sources):
     """
-    Flag out any bad data in the visibilities. This is a combination of global flagging
-    and using previously compiled flagging lists for the day's data.
+    Flag out any bad data in the visibilities. This is a combination of global
+    flagging and using previously compiled flagging lists for the day's data.
 
     :param dirname: The name of the day directory
     :param day: The day number being processed.
+    :param bandpass_cal: The source name of the bandpass calibrator
+    :param sources: The list of sources, which includes the phase calibrator
+           details
     :return: None
     """
 
@@ -90,6 +138,14 @@ def flag_data(dirname, day, bandpass_cal, sources):
         else:
             uvflag_cmd = "uvflag flagval=f options=brief vis='" + filename + "' edge=200,200"
             magmo.run_os_cmd(uvflag_cmd)
+
+    # Flag the 0km/s region in the bandpass calibrator
+    zero_km_plane = find_zero_hi_plane(dirname, bandpass_cal)
+    filename = "{0}/{1}.1420".format(dirname, bandpass_cal)
+    line = "channel,110,{0},1,1".format(zero_km_plane - 35)
+    uvflag_cmd = "uvflag flagval=f options=brief vis='" + filename + \
+                 "' line=" + line
+    magmo.run_os_cmd(uvflag_cmd)
 
     # Clip the data too far away for the mean in the calibrators
     for cal_src in calibrators:
@@ -137,7 +193,7 @@ def calibrate(dirname, bandpass_cal, sources, band_list, day):
 
     :param dirname: The name of the day directory
     :param bandpass_cal: The source name of the bandpass & flux calibrator
-    :param sources: The list of sources, which includes the pahse calibrator details
+    :param sources: The list of sources, which includes the phase calibrator details
     :param band_list: The list of bands being processed, each band is a map
     :param day: The day number being processed
     :return: error list
@@ -295,7 +351,7 @@ def build_images(day_dir_name, sources, band, day):
 
 def get_signal_noise_ratio(miriad_file):
     """
-    Retreive the singal to noise ratio for a miriad image file.
+    Retrieve the signal to noise ratio for a miriad image file.
     :param miriad_file:
     :return: The root mean square of the data and the maximum flux density
     """
@@ -318,8 +374,9 @@ def get_signal_noise_ratio(miriad_file):
 
 def find_strong_sources(day_dir_name, freq, sources, num_chan, min_sn):
     """
-    Identify the source files with a maxomum signla to noise which is greater than a threshold, that
-    is those restored images whcih show a source sufficiently brighter than the background noise.
+    Identify the source files with a maximum signal to noise which is greater
+    than a threshold, that is those restored images which show a source
+    sufficiently brighter than the background noise.
 
     :param day_dir_name: The name of the day directory
     :param freq: The primary identifier of the frequency to be checked.
@@ -474,7 +531,8 @@ def main():
     error_list.extend(build_images(dayDirName, sources, cont_band, day))
 
     # Produce HI image cube
-    strong_sources = find_strong_sources(dayDirName, cont_band['main'], sources, 1053, 1.2)
+    strong_sources = find_strong_sources(dayDirName, cont_band['main'], sources,
+                                         num_chan, sn_min)
     print "### Found the following bright sources in the data ", strong_sources
     error_list.extend(build_cubes(dayDirName, strong_sources, line_band))
 
