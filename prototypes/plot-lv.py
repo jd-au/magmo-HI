@@ -49,18 +49,23 @@ def readData():
             poor_sn = False
             #print gal_long
             for row in results_array:
-                x.append(gal_long)
-                y.append(row['velocity']/1000.0) # Convert from m/s to km/s
                 opacity = row['opacity']
-                c.append(opacity)
-                if opacity > 10 or opacity < -15:
+                if opacity > 6 or opacity < -8:
                     poor_sn = True
+            if not poor_sn:
+                for row in results_array:
+                    x.append(gal_long)
+                    y.append(row['velocity']/1000.0) # Convert from m/s to km/s
+                    opacity = row['opacity']
+                    c.append(opacity)
+                    if opacity > 10 or opacity < -15:
+                        poor_sn = True
+                field = filename.split('_')
+                if field[0] != prev_field:
+                    prev_field = field[0]
+                    num_fields += 1
             if poor_sn:
                 bad_spectra += 1
-            field = filename.split('_')
-            if field[0] != prev_field:
-                prev_field = field[0]
-                num_fields += 1
 
     print "In %d fields read %d spectra of which %d had reasonable S/N. " % (
         num_fields, len(vo_files), len(vo_files)-bad_spectra)
