@@ -3,8 +3,9 @@
 day=$1
 daydir="day${day}"
 today=`date +%Y%m%d`
-archivedir="prev_runs/${daydir}-${today}"
+archivedir="prev_runs/${today}/${daydir}"
 # Copy all
+mkdir "prev_runs/${today}"
 mkdir ${archivedir}
 mkdir  ${archivedir}/1420
 mkdir  ${archivedir}/1757
