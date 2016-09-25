@@ -218,18 +218,29 @@ def calibrate(dirname, bandpass_cal, sources, band_list, day):
             print "No bandpass file found for band %s." % (freq)
             exit(1)
 
-        # todo: Need to add line params to these - different for each band
-        magmo.run_os_cmd("mfcal vis="+bp_file+" options=interpolate")
-        magmo.run_os_cmd("gpcal vis="+bp_file+" options=xyvary")
+        magmo.run_os_cmd(
+            "mfcal vis=" + bp_file + " options=interpolate interval=0.25")
+        magmo.run_os_cmd("gpcal vis="+bp_file+" options=xyvary interval=0.25")
 
         # Plot bandpass of bandpass cal
-        magmo.run_os_cmd("gpplt options=bandpass vis="+bp_file+" device=" + bp_file +
-                         "-bandpass.png/png")
+        magmo.run_os_cmd(
+            "gpplt options=bandpass vis=" + bp_file + " device=" + bp_file +
+            "-bandpass.png/png")
+        magmo.run_os_cmd(
+            "uvplt options=nobase vis=" + bp_file + " device=" + bp_file +
+            "-amp.png/png")
+        magmo.run_os_cmd(
+            "uvplt options=equal,nobase stokes=i,q,u,v axis=real,imag vis=" +
+            bp_file + " device=" + bp_file + "-scatter.png/png ")
 
         t = Template('<tr><td colspan="2"><br>Bandpass of $bp_cal at $src_freq MHz</td></tr>\n' +
                      '<tr>\n<td>' +
                      '<a href="${bp_file}-bandpass.png"><img src="${bp_file}-bandpass.png" width="400px"></a>' +
-                     '</td><td></td>\n</tr>')
+                     '</td><td>'
+                     '<a href="${bp_file}-amp.png"><img src="${bp_file}-amp.png" width="400px"></a>' +
+                     '</td><td>'
+                     '<a href="${bp_file}-scatter.png"><img src="${bp_file}-scatter.png" width="400px"></a>' +
+                     '</td>\n</tr>')
         cal_idx.write(t.substitute(bp_cal=bandpass_cal, src_freq=freq,
                                    bp_file=bp_file[len(dirname) + 1:]))
 
@@ -240,7 +251,9 @@ def calibrate(dirname, bandpass_cal, sources, band_list, day):
                     try:
                         print "##--## Processing phase cal " + cal_file + " ##--##"
                         magmo.run_os_cmd('gpcopy vis='+bp_file+' out='+cal_file)
-                        magmo.run_os_cmd('gpcal vis='+cal_file+' options=xyvary,qusolv')
+                        magmo.run_os_cmd(
+                            'gpcal vis=' + cal_file + ' options=xyvary,qusolv' +
+                            ' interval=1')
                         magmo.run_os_cmd('gpboot vis='+cal_file+' cal='+bp_file)
                         magmo.run_os_cmd('mfboot vis=' + cal_file + ',' + bp_file +
                                          ' "select=source(' + bandpass_cal + ')"')
@@ -249,7 +262,7 @@ def calibrate(dirname, bandpass_cal, sources, band_list, day):
 
                     prefix = dirname + '/' + freq + '/cal-' + cal + "-" + src_freq
                     cmd = 'uvplt stokes=i,q,u,v axis=real,imag vis=' + cal_file \
-                          + ' device=' + prefix + '.png/png'
+                          + ' device=' + prefix + '.png/png options=equal'
                     magmo.run_os_cmd(cmd, False)
                     cmd = 'gpplt yaxis=phase options=xygains vis=' + cal_file \
                           + ' device=' + prefix + '-gain.png/png'
