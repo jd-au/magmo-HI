@@ -165,7 +165,7 @@ def find_bandpasscal(dirname):
     :param dirname: The name of the day directory
     :return: The source name of the calibrator, or None if no know calibrators were present.
     """
-    potential_cals = ['1934-638']
+    potential_cals = ['1934-638', '0823-500']
     for cal in potential_cals:
         path = dirname + '/' + cal + '.*'
         uvdirs = glob.glob(path)
@@ -218,9 +218,13 @@ def calibrate(dirname, bandpass_cal, sources, band_list, day):
             print "No bandpass file found for band %s." % (freq)
             exit(1)
 
+        cal_interval = 0.25
         magmo.run_os_cmd(
-            "mfcal vis=" + bp_file + " options=interpolate interval=0.25")
-        magmo.run_os_cmd("gpcal vis="+bp_file+" options=xyvary interval=0.25")
+            "mfcal vis=" + bp_file + " options=interpolate interval=" + str(
+                cal_interval))
+        magmo.run_os_cmd(
+            "gpcal vis=" + bp_file + " options=xyvary interval=" + str(
+                cal_interval))
 
         # Plot bandpass of bandpass cal
         magmo.run_os_cmd(
@@ -244,6 +248,7 @@ def calibrate(dirname, bandpass_cal, sources, band_list, day):
         cal_idx.write(t.substitute(bp_cal=bandpass_cal, src_freq=freq,
                                    bp_file=bp_file[len(dirname) + 1:]))
 
+        phase_cal_interval = 5  # min
         for cal in phase_cals:
             for src_freq in band['freqs']:
                 cal_file = dirname + '/' + cal + '.' + src_freq
@@ -253,7 +258,7 @@ def calibrate(dirname, bandpass_cal, sources, band_list, day):
                         magmo.run_os_cmd('gpcopy vis='+bp_file+' out='+cal_file)
                         magmo.run_os_cmd(
                             'gpcal vis=' + cal_file + ' options=xyvary,qusolv' +
-                            ' interval=1')
+                            ' interval=' + str(phase_cal_interval))
                         magmo.run_os_cmd('gpboot vis='+cal_file+' cal='+bp_file)
                         magmo.run_os_cmd('mfboot vis=' + cal_file + ',' + bp_file +
                                          ' "select=source(' + bandpass_cal + ')"')
