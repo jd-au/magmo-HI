@@ -16,6 +16,7 @@ import csv
 import glob
 import matplotlib.pyplot as plt
 import numpy as np
+import os
 import time
 
 
@@ -164,8 +165,7 @@ def extract_lv(spectra):
             continue
         y = np.concatenate((y, spectrum.velocities))
         c = np.concatenate((c, opacities))
-        for row in opacities:
-            x.append(spectrum.longitude)
+        x = np.concatenate((x, np.full(len(opacities), spectrum.longitude)))
         field_id = spectrum.get_field_id()
         if field_id != prev_field:
             prev_field = field_id
@@ -228,8 +228,13 @@ def output_spectra_catalogue(spectra):
     max_flux = np.zeros(rows)
     max_opacity = np.zeros(rows)
     min_opacity = np.zeros(rows)
+    max_velocity = np.zeros(rows)
+    min_velocity = np.zeros(rows)
     used = np.empty(rows, dtype=bool)
+    filenames = np.empty(rows, dtype=object)
+    local_paths = np.empty(rows, dtype=object)
 
+    base_path = os.path.realpath('.')
     i = 0
     for spectrum in spectra:
         days[i] = int(spectrum.day)
@@ -238,16 +243,22 @@ def output_spectra_catalogue(spectra):
         longitudes[i] = spectrum.longitude
         latitudes[i] = spectrum.latitude
         max_flux[i] = np.max(spectrum.fluxes)
-        max_opacity[i] = np.max(spectrum.opacities)
         min_opacity[i] = np.min(spectrum.opacities)
+        max_opacity[i] = np.max(spectrum.opacities)
+        min_velocity[i] = np.min(spectrum.velocities)
+        max_velocity[i] = np.max(spectrum.velocities)
         used[i] = True if not spectrum.low_sn else False
+        filenames[i] = 'day' + spectrum.day + '/' + spectrum.field_name + \
+                       "_src" + spectrum.src_id + "_plot.png"
+        local_paths[i] = base_path + '/' + filenames[i]
         i += 1
 
     spectra_table = Table(
-        [days, fields, sources, longitudes, latitudes, max_flux, max_opacity,
-         min_opacity, used],
-        names=['Day', 'Field', 'Source', 'Longitude',
-               'Latitude', 'Max_Flux', 'Max_Opacity', 'Min_Opacity', 'Used'])
+        [days, fields, sources, longitudes, latitudes, max_flux, min_opacity,
+         max_opacity, min_velocity, max_velocity, used, filenames, local_paths],
+        names=['Day', 'Field', 'Source', 'Longitude', 'Latitude', 'Max_Flux',
+               'Min_Opacity', 'Max_Opacity', 'Min_Velocity', 'Max_Velocity',
+               'Used', 'Filename', 'Local_Path'])
     votable = from_table(spectra_table)
     filename = "magmo-spectra.vot"
     writeto(votable, filename)
