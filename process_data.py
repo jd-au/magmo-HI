@@ -178,11 +178,15 @@ def find_bandpasscal(dirname):
 
 
 def find_freq_file(name_prefix, freq_list):
-    for src_freq in freq_list:
-        bp_file = name_prefix + '.' + src_freq
-        print 'Looking for', bp_file
-        if os.path.exists(bp_file):
-            return bp_file, src_freq
+    prefixes = [name_prefix]
+    if name_prefix.startswith("0"):
+        prefixes.append(name_prefix.lstrip("0"))
+    for prefix in prefixes:
+        for src_freq in freq_list:
+            bp_file = prefix + '.' + src_freq
+            print ('Looking for', bp_file)
+            if os.path.exists(bp_file):
+                return bp_file, src_freq
 
     return None, None
 
@@ -408,6 +412,7 @@ def find_strong_sources(day_dir_name, freq, sources, num_chan, min_sn):
     src_rms = np.zeros(len(sources))
     src_max = np.zeros(len(sources))
     src_sn = np.zeros(len(sources))
+    src_used = []
 
     i = 0
     for src in sources:
@@ -419,19 +424,22 @@ def find_strong_sources(day_dir_name, freq, sources, num_chan, min_sn):
             if rms > 0:
                 sn = max / rms
             sn /= math.sqrt(num_chan)
-            if sn > min_sn:
+            strong = sn > min_sn
+            if strong:
                 strong_sources.append(src)
             src_names.append(src_name)
             src_rms[i] = rms
             src_max[i] = max
             src_sn[i] = sn
+            src_used.append("Y" if strong else "N")
             i += 1
 
     with open(day_dir_name+'/stats.csv', "wb") as stats:
         writer = csv.writer(stats, quoting=csv.QUOTE_NONNUMERIC)
-        writer.writerow(["name", "rms", "max", "sn"])
+        writer.writerow(["name", "rms", "max", "sn", "strong"])
         for i in range(0, len(src_names)):
-            writer.writerow([src_names[i], src_rms[i], src_max[i], src_sn[i]])
+            writer.writerow(
+                [src_names[i], src_rms[i], src_max[i], src_sn[i], src_used[i]])
     #table = OrderedDict([('name', src_names), ('rms', src_rms), ('max', src_max), ('s/n', src_sn)])
     #ascii.write(table, day_dir_name+'/stats.dat', format='fixed_width', bookend=False, delimiter=None, quotechar='"')
 
