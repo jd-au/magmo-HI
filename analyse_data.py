@@ -177,7 +177,9 @@ def plot_spectrum(x, y, filename, title):
 
     :param x: The velocity data
     :param y: The opacity values for each velocity step
-    :param filename: The file the plot should be written to. Should be an .eps or .pdf file.
+    :param filename: The file the plot should be written to. Should be
+         an .eps or .pdf file.
+    :param title: The title for the plot
     """
     fig = plt.figure()
     plt.plot(x/1000, y)
