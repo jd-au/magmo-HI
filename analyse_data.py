@@ -1,3 +1,9 @@
+# Find sources in the data and produce spectra for each suitable source.
+
+# Author James Dempsey
+# Date 28 Aug 2016
+
+from __future__ import print_function, division
 
 import magmo
 import os
@@ -7,11 +13,12 @@ import csv
 
 from astropy.io import fits
 from astropy.io import votable
-from astropy.coordinates import SkyCoord
+from astropy.coordinates import SkyCoord, Angle
 from astropy.wcs import WCS
 from astropy.table import Table, Column
 from astropy.io.votable.tree import Param,Info
 from astropy.io.votable import from_table, writeto
+from astropy import units as u
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.core.records as rec
@@ -25,13 +32,13 @@ num_chan = 627
 
 def get_high_signal_fields(day_dir_name):
     """
-    Retrieve a list of fields observed in a particular day that have sufficient signal
-    to noise to search for background sources.
+    Retrieve a list of fields observed in a particular day that have sufficient
+    signal to noise to search for background sources.
     :param day_dir_name: The name of the day's directory.
     :return: A list of high signal fields.
     """
     field_list = []
-    print "Fields of interest:"
+    print ("Fields of interest:")
     with open(day_dir_name + '/stats.csv', 'rb') as stats:
         reader = csv.reader(stats)
         first = True
@@ -40,7 +47,7 @@ def get_high_signal_fields(day_dir_name):
                 first = False
             else:
                 if float(row[3]) > sn_min:
-                    print row
+                    print (row)
                     field_list.append(row[0])
 
     return field_list
@@ -61,7 +68,7 @@ def find_sources(day_dir_name, field_name):
     cont_file = day_dir_name + "/1757/magmo-" + field_name + "_1757_restor.fits"
     table_file = day_dir_name + "/" + field_name + '_src.vot'
     try:
-        print "##--## Searching continuum image " + cont_file + " ##--##"
+        print ("##--## Searching continuum image " + cont_file + " ##--##")
         magmo.run_os_cmd('bane ' + cont_file)
         aegean_cmd = 'aegean ' + cont_file + ' --autoload --telescope=ATCA ' \
                      '--cores=1 --table=' + table_file
@@ -72,7 +79,7 @@ def find_sources(day_dir_name, field_name):
 
 
 def read_sources(filename):
-    print "Extracting sources from " + filename
+    print ("Extracting sources from " + filename)
     sources = []
     src_votable = votable.parse(filename, pedantic=False)
     results = src_votable.get_first_table().array
@@ -83,19 +90,57 @@ def read_sources(filename):
         rms = row['local_rms']
         flux = row['peak_flux']
         sn = flux / rms
-        print "Found source %s at %.4f, %.4f with flux %.4f and rms of %.4f giving S/N of %.4f" % \
-              (id, ra, dec, flux, rms, sn)
+        print ("Found source %s at %.4f, %.4f with flux %.4f and rms of %.4f "
+               "giving S/N of %.4f" % (id, ra, dec, flux, rms, sn))
         if sn > 10 and flux > 0.02:
             sources.append([ra, dec, id, flux])
         else:
-            print "Ignoring source at %.4f, %.4f due to low S/N of %.4f or flux of %.4f" % \
-                  (ra, dec, sn, flux)
+            print ("Ignoring source at %.4f, %.4f due to low S/N of %.4f or "
+                   "flux of %.4f" % (ra, dec, sn, flux))
 
     return sources
 
 
+def read_continuum_ranges():
+    continuum_ranges = []
+    with open('magmo-continuum.csv', 'rb') as con_def:
+        reader = csv.reader(con_def)
+        first = True
+        for row in reader:
+            if first:
+                first = False
+            else:
+                continuum_ranges.append(
+                    [int(row[0]), int(row[1]), int(row[2]), int(row[3])])
+
+    print (continuum_ranges)
+    return continuum_ranges
+
+
+def find_edges(fluxes, num_edge_chan):
+    """
+    Seek from the edges to find where the data starts for this set of fluxes.
+    This accounts for an optional number of channels in the data which have no
+    data recorded.
+    :param fluxes: The array of fluxes to be checked.
+    :param num_edge_chan: The number of edge channels with data to be skipped
+    :return: The index of the first and last cell to have data.
+    """
+
+    l_edge = 0
+    r_edge = len(fluxes)-1
+
+    while fluxes[l_edge] == 0 and l_edge < len(fluxes):
+        l_edge += 1
+
+    while fluxes[r_edge] == 0 and r_edge > 0:
+        r_edge -= 1
+
+    return l_edge + num_edge_chan, r_edge - num_edge_chan
+
+
 def extract_spectra(daydirname, field):
-    num_edge_chan = 48
+    num_edge_chan = 10  # todo: make this a velocity relative value
     fits_filename = "{0}/1420/magmo-{1}_1420_sl_restor.fits".format(daydirname,
                                                                     field)
     src_filename = "{0}/{1}_src_comp.vot".format(daydirname, field)
@@ -103,8 +148,8 @@ def extract_spectra(daydirname, field):
     spectra = dict()
     source_ids = dict()
     if not os.path.exists(fits_filename):
-        print "Warning: File %s does not exist, skipping extraction." % \
-              fits_filename
+        print ("Warning: File %s does not exist, skipping extraction." % \
+              fits_filename)
         return spectra, source_ids
 
     sources = read_sources(src_filename)
@@ -118,16 +163,19 @@ def extract_spectra(daydirname, field):
         pix = w.wcs_world2pix(src[0], src[1], 0, 0, 1)
         x_coord = int(round(pix[0])) - 1  # 266
         y_coord = int(round(pix[1])) - 1  # 197
-        print "Translated %.4f, %.4f to %d, %d" % (
-            src[0], src[1], x_coord, y_coord)
+        print ("Translated %.4f, %.4f to %d, %d" % (
+            src[0], src[1], x_coord, y_coord))
 
         slice = image[0, :, y_coord, x_coord]
+        l_edge, r_edge = find_edges(slice, num_edge_chan)
+        print("Using data range %d - %d out of %d channels." % (
+            l_edge, r_edge, len(slice)))
 
         # plotSpectrum(np.arange(slice.size), slice)
         spectrum_array = rec.fromarrays(
-            [np.arange(slice.size)[num_edge_chan:-num_edge_chan],
-             velocities[num_edge_chan:-num_edge_chan],
-             slice[num_edge_chan:-num_edge_chan]],
+            [np.arange(slice.size)[l_edge:r_edge],
+             velocities[l_edge:r_edge],
+             slice[l_edge:r_edge]],
             names='plane,velocity,flux')
         c = SkyCoord(src[0], src[1], frame='icrs', unit="deg")
         spectra[c.galactic.l] = spectrum_array
@@ -139,20 +187,37 @@ def extract_spectra(daydirname, field):
     return spectra, source_ids
 
 
-def get_mean_continuum(spectrum):
+def get_mean_continuum(spectrum, longitude, continuum_ranges):
     """
-    Calulate the mean of the continuum values. Will divide the spectrum
+    Calculate the mean of the continuum values. Will divide the spectrum
     into continuum and line parts based on those values with a 1 sigma
     deviation from the mean of the first 5% of values.  This assumes that
     there is a leading continuum block in the spectrum.
     :param spectrum: The spectrum to be analysed, should be a numpy array of
         plane, velocity and flux values.
-    :return: A single float whcih is the mean continuum flux.
+    :param longitude: The galactic longitude of the target object
+    :param continuum_ranges: The predefined continuum blocks by longitude range
+    :return: A single float which is the mean continuum flux.
     """
-    num_bin_ignore = 0
-    continuum_bins_left = 200
+    int_l = int(longitude.degree)
+    continuum_start_vel = -210
+    continuum_end_vel = -150
+    for row in continuum_ranges:
+        if row[0] <= int_l <= row[1]:
+            continuum_start_vel = row[2]
+            continuum_end_vel = row[3]
 
-    continuum_sample = spectrum.flux[num_bin_ignore:continuum_bins_left+num_bin_ignore]
+    continuum_range = np.where(
+        continuum_start_vel*10000 < spectrum.velocity)
+    bin_start = continuum_range[0][0]
+    continuum_range = np.where(
+        spectrum.velocity < continuum_end_vel*1000)
+    bin_end = continuum_range[0][-1]
+
+    print("Using bins %d to %d (velocity range %d to %d) out of %d" % (
+        bin_start, bin_end, continuum_start_vel, continuum_end_vel, len(spectrum.velocity)))
+    continuum_sample = spectrum.flux[bin_start:bin_end]
+    # print ("...gave sample of", continuum_sample)
     mean_cont = np.mean(continuum_sample)
     return mean_cont
 
@@ -196,7 +261,7 @@ def plot_spectrum(x, y, filename, title):
     return
 
 
-def output_spectra(spectrum, opacity, filename, longitude):
+def output_spectra(spectrum, opacity, filename, longitude, latitude):
     """
     Write the spectrum (velocity, flux and opacity) to a votable format file.
 
@@ -204,16 +269,18 @@ def output_spectra(spectrum, opacity, filename, longitude):
     :param opacity:  The opacity to be output.
     :param filename:  The filename to be created
     :param longitude: The galactic longitude of the target object
+    :param latitude: The galactic latitude of the target object
     """
     table = Table([spectrum.plane, spectrum.velocity, opacity, spectrum.flux],
                   names=('plane', 'velocity', 'opacity', 'flux'),
                   meta={'name': 'Opacity', 'id' : 'opacity'})
     votable = from_table(table)
     votable.infos.append(Info('longitude', 'longitude', longitude.value))
+    votable.infos.append(Info('latitude', 'latitude', latitude.value))
     writeto(votable, filename)
 
 
-def produce_spectra(day_dir_name, day, field_list):
+def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
     with open(day_dir_name + '/spectra.html', 'w') as spectra_idx:
         t = Template(
             '<html>\n<head><title>D$day Spectra</title></head>\n'
@@ -228,22 +295,28 @@ def produce_spectra(day_dir_name, day, field_list):
             spectra_idx.write(t.substitute(field=field))
 
             idx = 0
-            for longitude in spectra.keys():
+            for longitude in sorted(spectra.keys()):
                 spectrum = spectra.get(longitude)
                 src_data = source_ids.get(longitude)
+                name_prefix = field + '_src' + src_data[0]
                 idx += 1
-                mean = get_mean_continuum(spectrum)
-                print 'Continuum mean is %.5f Jy' % (mean)
+                mean = get_mean_continuum(spectrum, longitude, continuum_ranges)
+                if mean < 0:
+                    print(("WARNING: Skipped spectrum %s with negative " +
+                          "mean: %.5f") % (name_prefix, mean))
+                    continue;
+
+                print ('Continuum mean of %s is %.5f Jy' % (name_prefix, mean))
                 opacity = get_opacity(spectrum, mean)
                 # print opacity
-                name_prefix = field + '_src' + src_data[0]
                 dir_prefix = day_dir_name + "/"
                 img_name = name_prefix + "_plot.png"
                 plot_spectrum(spectrum.velocity, opacity, dir_prefix + img_name,
                               "Spectra for source {0} in field {1}".format(
                                   src_data[0], field))
                 filename = dir_prefix + name_prefix + '_opacity.votable.xml'
-                output_spectra(spectrum, opacity, filename, longitude)
+                latitude = Angle(0 * u.deg) # todo: Read this from the spectra
+                output_spectra(spectrum, opacity, filename, longitude, latitude)
 
                 t = Template('<tr><td>${img}</td><td>${longitude}</td>' +
                              '<td>${peak_flux}</td><td><a href="${img}">' +
@@ -270,11 +343,11 @@ def main():
     # Check metadata against file system
     day_dir_name = "day" + day
     if not os.path.isdir(day_dir_name):
-        print "Directory %s could not be found." % day_dir_name
+        print ("Directory %s could not be found." % day_dir_name)
         return 1
 
-    print "#### Started source finding on MAGMO day %s at %s ####" % \
-          (day, time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start)))
+    print ("#### Started source finding on MAGMO day %s at %s ####" % \
+          (day, time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start))))
     error_list = []
 
     # Read list of fields, filter for ones to be processed
@@ -285,20 +358,21 @@ def main():
         error_list.extend(find_sources(day_dir_name, field))
 
     # For each file, extract spectra
-    produce_spectra(day_dir_name, day, field_list)
+    continuum_ranges = read_continuum_ranges()
+    produce_spectra(day_dir_name, day, field_list, continuum_ranges)
 
     # Report
     end = time.time()
-    print '#### Processing completed at %s ####' \
-          % (time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end)))
-    print 'Searched %d images in %.02f s' % (len(field_list),
-                                               end - start)
+    print ('#### Processing completed at %s ####' \
+          % (time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end))))
+    print ('Searched %d images in %.02f s' % (len(field_list),
+                                               end - start))
     if len(error_list) == 0:
-        print "Hooray! No errors found."
+        print ("Hooray! No errors found.")
     else:
-        print "%d errors were encountered:" % (len(error_list))
+        print ("%d errors were encountered:" % (len(error_list)))
         for err in error_list:
-            print err
+            print (err)
     return 0
 
 
