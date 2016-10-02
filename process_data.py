@@ -180,7 +180,10 @@ def find_bandpasscal(dirname):
 def find_freq_file(name_prefix, freq_list):
     prefixes = [name_prefix]
     if name_prefix.startswith("0"):
-        prefixes.append(name_prefix.lstrip("0"))
+        subname = name_prefix.lstrip("0")
+        if subname.startswith("."):
+            subname = "0" + subname
+        prefixes.append(subname)
     for prefix in prefixes:
         for src_freq in freq_list:
             bp_file = prefix + '.' + src_freq
