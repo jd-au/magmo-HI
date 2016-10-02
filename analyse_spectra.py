@@ -14,6 +14,7 @@ from astropy.table import Table
 
 import csv
 import glob
+import magmo
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -72,7 +73,7 @@ def read_spectra():
 
     vo_files = glob.glob('day*/*.votable.xml')
     for filename in sorted(vo_files):
-        print ('Reading', filename)
+        #print ('Reading', filename)
         votable = parse(filename, pedantic=False)
         results = next(resource for resource in votable.resources if
                        resource.type == "results")
@@ -159,7 +160,7 @@ def extract_lv(spectra):
 
     for spectrum in spectra:
         opacities = spectrum.opacities
-        if np.max(opacities) > 6 or np.min(opacities) < -8:
+        if np.max(opacities) > 4 or np.min(opacities) < -4:
             bad_spectra += 1
             spectrum.low_sn = True
             continue
@@ -177,7 +178,7 @@ def extract_lv(spectra):
     return x, y, c
 
 
-def plot_lv(x, y, c, filename):
+def plot_lv(x, y, c, filename, continuum_ranges):
     """
     Produce a longitude-velocity diagram from the supplied data and write it
     out to a file.
@@ -198,7 +199,7 @@ def plot_lv(x, y, c, filename):
     #print val
     fig = plt.figure(1, (12,6))
     # plt.subplots_adjust(hspace=0.5)
-    plt.subplot(111, axisbg='black')
+    plt.subplot(111, axisbg='gray')
     plt.hexbin(x, y, val, cmap=plt.cm.gist_heat_r)
     # plt.scatter(x, y, cmap=plt.cm.YlOrRd_r)
     plt.axis([xmax, xmin, ymin, ymax])
@@ -207,6 +208,27 @@ def plot_lv(x, y, c, filename):
     plt.ylabel('LSR Velocity (km/s)')
     cb = plt.colorbar()
     cb.set_label(r'$e^{(-\tau)}$')
+
+    # Add bands for the continuum ranges
+    for con_range in continuum_ranges:
+        min_l = con_range['min_long'] #if con_range['min_long'] < 181 else 360 - con_range['min_long']
+        max_l = con_range['max_long'] #if con_range['max_long'] < 181 else 360 - con_range['max_long']
+        print (con_range, min_l, max_l)
+        if min_l < 181:
+            min_x = 0.5 - (min_l / 360.0)
+            max_x = 0.5 - (max_l / 360.0)
+        else:
+            min_x = 0.5 + ((360 - min_l) / 360.0)
+            max_x = 0.5 + ((360 - max_l) / 360.0)
+        min_l= (max_l if max_l < min_l else min_l) / 360.0
+        max_l= (min_l if max_l < min_l else max_l) / 360.0 # (180+min_l) / 360.0
+        print (con_range, min_x, max_x)
+        plt.axhline(con_range['min_con_vel'], xmin=min_x,
+                    xmax=max_x, color='blue')
+                    #linestyle='dashed')
+        plt.axhline(con_range['max_con_vel'], xmin=min_x,
+                    xmax=max_x, color='blue')
+                    #linestyle='dashed')
 
     plt.savefig(filename)
     return
@@ -230,6 +252,7 @@ def output_spectra_catalogue(spectra):
     min_opacity = np.zeros(rows)
     max_velocity = np.zeros(rows)
     min_velocity = np.zeros(rows)
+    rms_opacity = np.zeros(rows)
     used = np.empty(rows, dtype=bool)
     filenames = np.empty(rows, dtype=object)
     local_paths = np.empty(rows, dtype=object)
@@ -245,6 +268,7 @@ def output_spectra_catalogue(spectra):
         max_flux[i] = np.max(spectrum.fluxes)
         min_opacity[i] = np.min(spectrum.opacities)
         max_opacity[i] = np.max(spectrum.opacities)
+        rms_opacity[i] = np.sqrt(np.mean(np.square(spectrum.opacities)))
         min_velocity[i] = np.min(spectrum.velocities)
         max_velocity[i] = np.max(spectrum.velocities)
         used[i] = True if not spectrum.low_sn else False
@@ -255,10 +279,11 @@ def output_spectra_catalogue(spectra):
 
     spectra_table = Table(
         [days, fields, sources, longitudes, latitudes, max_flux, min_opacity,
-         max_opacity, min_velocity, max_velocity, used, filenames, local_paths],
+         max_opacity, rms_opacity, min_velocity, max_velocity, used, filenames,
+         local_paths],
         names=['Day', 'Field', 'Source', 'Longitude', 'Latitude', 'Max_Flux',
-               'Min_Opacity', 'Max_Opacity', 'Min_Velocity', 'Max_Velocity',
-               'Used', 'Filename', 'Local_Path'])
+               'Min_Opacity', 'Max_Opacity', 'RMS_Opacity', 'Min_Velocity',
+               'Max_Velocity', 'Used', 'Filename', 'Local_Path'])
     votable = from_table(spectra_table)
     filename = "magmo-spectra.vot"
     writeto(votable, filename)
@@ -311,7 +336,8 @@ def main():
     # Process Spectra
     spectra = read_spectra()
     x, y, c = extract_lv(spectra)
-    plot_lv(x, y, c, 'magmo-lv.pdf')
+    continuum_ranges = magmo.get_continuum_ranges()
+    plot_lv(x, y, c, 'magmo-lv.pdf', continuum_ranges)
     output_spectra_catalogue(spectra)
 
     # Process Fields
