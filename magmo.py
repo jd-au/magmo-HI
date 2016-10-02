@@ -91,3 +91,46 @@ def ensure_dir_exists(dirname):
         print "Directory %s could not be created." % dirname
         exit(1)
     return None
+
+
+def get_continuum_ranges():
+    """
+    Read in the predefined velocity ranges for different longitudes over which
+    the continuum will be measured. Each range will have keys min_long,
+    max_long, min_con_vel, max_con_vel. All values will be integers,
+
+    :return: A list of dictionaries.
+    """
+
+    continuum_ranges = []
+    with open('magmo-continuum.csv', 'rb') as con_def:
+        reader = csv.reader(con_def)
+        first = True
+        for row in reader:
+            if first:
+                first = False
+            else:
+                continuum_ranges.append(
+                    {'min_long': int(row[0]), 'max_long': int(row[1]),
+                     'min_con_vel': int(row[2]), 'max_con_vel': int(row[3])})
+
+    print (continuum_ranges)
+    return continuum_ranges
+
+
+def lookup_continuum_range(continuum_ranges, longitude):
+    """
+    Lookup the velocity range that shouild be used for measuring the continuum
+    levels at a particular longitude.
+
+    :param continuum_ranges: The list of continuum ranges.
+    :param longitude: The integer longitude to be checked.
+    :return: The min and max continuum velocities.
+    """
+    continuum_start_vel = -210
+    continuum_end_vel = -150
+    for row in continuum_ranges:
+        if row['min_long'] <= longitude <= row['max_long']:
+            continuum_start_vel = row['min_con_vel']
+            continuum_end_vel = row['max_con_vel']
+    return continuum_start_vel, continuum_end_vel

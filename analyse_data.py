@@ -199,13 +199,8 @@ def get_mean_continuum(spectrum, longitude, continuum_ranges):
     :param continuum_ranges: The predefined continuum blocks by longitude range
     :return: A single float which is the mean continuum flux.
     """
-    int_l = int(longitude.degree)
-    continuum_start_vel = -210
-    continuum_end_vel = -150
-    for row in continuum_ranges:
-        if row[0] <= int_l <= row[1]:
-            continuum_start_vel = row[2]
-            continuum_end_vel = row[3]
+    continuum_start_vel, continuum_end_vel = magmo.lookup_continuum_range(
+        continuum_ranges, int(longitude.degree))
 
     print(
         "Looking for velocity range %d to %d in data of %d to %d at longitude %.3f" %
@@ -225,7 +220,7 @@ def get_mean_continuum(spectrum, longitude, continuum_ranges):
     continuum_sample = spectrum.flux[bin_start:bin_end]
     # print ("...gave sample of", continuum_sample)
     mean_cont = np.mean(continuum_sample)
-    return mean_cont
+    return mean_cont, continuum_start_vel, continuum_end_vel
 
 
 def get_opacity(spectrum, mean):
@@ -242,7 +237,7 @@ def get_opacity(spectrum, mean):
     return spectrum.flux/mean
 
 
-def plot_spectrum(x, y, filename, title):
+def plot_spectrum(x, y, filename, title, con_start_vel, con_end_vel):
     """
     Output a plot of opacity vs LSR velocity to a specified file.
 
@@ -251,11 +246,15 @@ def plot_spectrum(x, y, filename, title):
     :param filename: The file the plot should be written to. Should be
          an .eps or .pdf file.
     :param title: The title for the plot
+    :param con_start_vel: The minimum velocity that the continuum was measured at.
+    :param con_end_vel: The maximum velocity that the continuum was measured at.
     """
     fig = plt.figure()
     plt.plot(x/1000, y)
 
     plt.axhline(1, color='r')
+    plt.axvline(con_start_vel, color='g', linestyle='dashed')
+    plt.axvline(con_end_vel, color='g', linestyle='dashed')
 
     plt.xlabel(r'Velocity relative to LSR (km/s)')
     plt.ylabel(r'$e^{(-\tau)}$')
@@ -306,7 +305,9 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
                 src_data = source_ids.get(longitude)
                 name_prefix = field + '_src' + src_data[0]
                 idx += 1
-                mean = get_mean_continuum(spectrum, longitude, continuum_ranges)
+                mean, min_con_vel, max_con_vel = get_mean_continuum(spectrum,
+                                                                    longitude,
+                                                                    continuum_ranges)
                 if mean < 0:
                     print(("WARNING: Skipped spectrum %s with negative " +
                           "mean: %.5f") % (name_prefix, mean))
@@ -319,7 +320,7 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
                 img_name = name_prefix + "_plot.png"
                 plot_spectrum(spectrum.velocity, opacity, dir_prefix + img_name,
                               "Spectra for source {0} in field {1}".format(
-                                  src_data[0], field))
+                                  src_data[0], field), min_con_vel, max_con_vel)
                 filename = dir_prefix + name_prefix + '_opacity.votable.xml'
                 latitude = Angle(0 * u.deg) # todo: Read this from the spectra
                 output_spectra(spectrum, opacity, filename, longitude, latitude)
@@ -364,7 +365,7 @@ def main():
         error_list.extend(find_sources(day_dir_name, field))
 
     # For each file, extract spectra
-    continuum_ranges = read_continuum_ranges()
+    continuum_ranges = magmo.get_continuum_ranges()
     produce_spectra(day_dir_name, day, field_list, continuum_ranges)
 
     # Report
