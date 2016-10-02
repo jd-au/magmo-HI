@@ -3,7 +3,7 @@
 # Run the processing steps for a day
 
 if [[ -z "$1" ]] ; then
-    echo "Usage: reprocess.sh day"
+    echo "Usage: reprocess.sh day [archivefoldername]"
     exit 1
 fi
 
@@ -24,7 +24,7 @@ echo "Analysing ... "
 python analyse_data.py ${day} >& ${daydir}/analyse.log
 
 echo "Archiving ..."
-./archive.sh ${day}
+./archive.sh ${day} ${2-`date +%Y%m%d`}
 
 echo "Done"
 date

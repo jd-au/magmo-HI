@@ -2,8 +2,9 @@
 
 day=$1
 daydir="day${day}"
-today=`date +%Y%m%d`
+today=${2-`date +%Y%m%d`}
 archivedir="prev_runs/${today}/${daydir}"
+echo "Archiving ${daydir} to ${archivedir}"
 # Copy all
 mkdir "prev_runs/${today}"
 mkdir ${archivedir}
