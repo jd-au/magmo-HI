@@ -19,6 +19,19 @@ class CommandFailedError(Exception):
 
 
 # functions to be made common
+def get_metadata_file_path(filename):
+    """
+    Take a metadata file name and get the path to it givren that it will be in
+    the same folder as this script.
+
+    :param filename: The filename of the metadata file.
+    :return: The absolute path of the file (including the filename)
+    """
+    script_dir = os.path.dirname(__file__)
+    abs_file_path = os.path.join(script_dir, filename)
+    return abs_file_path
+
+
 def get_day_file_data(day):
     """
     Read the magmo-days-full.csv file and find the row for the requested day.
@@ -26,7 +39,7 @@ def get_day_file_data(day):
     :return: The day's row, or None if the day is not defined
     """
 
-    with open('magmo-days-full.csv', 'rb') as magmodays:
+    with open(get_metadata_file_path('magmo-days-full.csv'), 'rb') as magmodays:
         reader = csv.reader(magmodays)
         for row in reader:
             if row[0] == day:
@@ -42,7 +55,7 @@ def get_day_obs_data(day):
     """
 
     sources = []
-    with open('magmo-obs.csv', 'rb') as magmo_obs:
+    with open(get_metadata_file_path('magmo-obs.csv'), 'rb') as magmo_obs:
         reader = csv.reader(magmo_obs)
         for row in reader:
             if row[0] == day:
@@ -103,7 +116,7 @@ def get_continuum_ranges():
     """
 
     continuum_ranges = []
-    with open('magmo-continuum.csv', 'rb') as con_def:
+    with open(get_metadata_file_path('magmo-continuum.csv'), 'rb') as con_def:
         reader = csv.reader(con_def)
         first = True
         for row in reader:
@@ -114,7 +127,6 @@ def get_continuum_ranges():
                     {'min_long': int(row[0]), 'max_long': int(row[1]),
                      'min_con_vel': int(row[2]), 'max_con_vel': int(row[3])})
 
-    print (continuum_ranges)
     return continuum_ranges
 
 
