@@ -208,7 +208,7 @@ def get_mean_continuum(spectrum, longitude, continuum_ranges):
             continuum_end_vel = row[3]
 
     print(
-        "Looking for velocity range %d to %d in data of %d to %d at longitude %f.3" %
+        "Looking for velocity range %d to %d in data of %d to %d at longitude %.3f" %
         (continuum_start_vel, continuum_end_vel,
          np.min(spectrum.velocity) / 1000.0,
          np.max(spectrum.velocity) / 1000.0, longitude.degree))
