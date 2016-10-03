@@ -13,6 +13,7 @@ from astropy.io.votable import parse, from_table, writeto
 from astropy.table import Table
 
 import csv
+import datetime
 import glob
 import magmo
 import matplotlib.pyplot as plt
@@ -37,6 +38,10 @@ class Field(object):
 
         self.longitude = longitude
         self.latitude = latitude
+
+
+    def get_field_id(self):
+        return str(self.day) + "-" + str(self.name)
 
 
 class Spectrum(object):
@@ -72,6 +77,7 @@ def read_spectra():
     spectra = []
 
     vo_files = glob.glob('day*/*.votable.xml')
+    print ("Reading {} spectrum files.".format(len(vo_files)))
     for filename in sorted(vo_files):
         #print ('Reading', filename)
         votable = parse(filename, pedantic=False)
@@ -123,8 +129,9 @@ def read_field_stats():
     fields = []
 
     stats_files = glob.glob('day*/stats.csv')
+    print ("Reading {} day stats files.".format(len(stats_files)))
     for filename in sorted(stats_files):
-        print ('Reading', filename)
+        # print ('Reading', filename)
         day = int(filename.split('/')[0][3:])
 
         with open(filename, 'rb') as stats:
@@ -157,6 +164,7 @@ def extract_lv(spectra):
     bad_spectra = 0
     prev_field = ''
     num_fields = 0
+    used_fields = []
 
     for spectrum in spectra:
         opacities = spectrum.opacities
@@ -170,15 +178,16 @@ def extract_lv(spectra):
         field_id = spectrum.get_field_id()
         if field_id != prev_field:
             prev_field = field_id
+            used_fields.append(field_id)
             num_fields += 1
 
     print ("In %d fields read %d spectra of which %d had reasonable S/N. " % (
         num_fields, len(spectra), len(spectra)-bad_spectra))
 
-    return x, y, c
+    return x, y, c, used_fields
 
 
-def plot_lv(x, y, c, filename, continuum_ranges):
+def plot_lv(x, y, c, filename, continuum_ranges, zoom):
     """
     Produce a longitude-velocity diagram from the supplied data and write it
     out to a file.
@@ -189,17 +198,17 @@ def plot_lv(x, y, c, filename, continuum_ranges):
     :param filename: The file to write the plot to.
     :return: None
     """
-    xmin =-180
-    xmax = 180
+    xmin = -120 if zoom else -180
+    xmax = 40 if zoom else 180
     ymin = -300
     ymax = 300
 
-    print("X: %d, Y: %d, data: %d" % (len(x), len(y), len(c) ))
+    # print("X: %d, Y: %d, data: %d" % (len(x), len(y), len(c) ))
     val = np.clip(c, -0.005, 1.05)
     #print val
     fig = plt.figure(1, (12,6))
     # plt.subplots_adjust(hspace=0.5)
-    plt.subplot(111, axisbg='gray')
+    plt.subplot(111, axisbg='black' if zoom else 'gray')
     plt.hexbin(x, y, val, cmap=plt.cm.gist_heat_r)
     # plt.scatter(x, y, cmap=plt.cm.YlOrRd_r)
     plt.axis([xmax, xmin, ymin, ymax])
@@ -210,27 +219,27 @@ def plot_lv(x, y, c, filename, continuum_ranges):
     cb.set_label(r'$e^{(-\tau)}$')
 
     # Add bands for the continuum ranges
-    for con_range in continuum_ranges:
-        min_l = con_range['min_long'] #if con_range['min_long'] < 181 else 360 - con_range['min_long']
-        max_l = con_range['max_long'] #if con_range['max_long'] < 181 else 360 - con_range['max_long']
-        print (con_range, min_l, max_l)
-        if min_l < 181:
-            min_x = 0.5 - (min_l / 360.0)
-            max_x = 0.5 - (max_l / 360.0)
-        else:
-            min_x = 0.5 + ((360 - min_l) / 360.0)
-            max_x = 0.5 + ((360 - max_l) / 360.0)
-        min_l= (max_l if max_l < min_l else min_l) / 360.0
-        max_l= (min_l if max_l < min_l else max_l) / 360.0 # (180+min_l) / 360.0
-        print (con_range, min_x, max_x)
-        plt.axhline(con_range['min_con_vel'], xmin=min_x,
-                    xmax=max_x, color='blue')
-                    #linestyle='dashed')
-        plt.axhline(con_range['max_con_vel'], xmin=min_x,
-                    xmax=max_x, color='blue')
-                    #linestyle='dashed')
+    if not zoom:
+        for con_range in continuum_ranges:
+            min_l = con_range['min_long'] #if con_range['min_long'] < 181 else 360 - con_range['min_long']
+            max_l = con_range['max_long'] #if con_range['max_long'] < 181 else 360 - con_range['max_long']
+            if min_l < 181:
+                min_x = 0.5 - (min_l / 360.0)
+                max_x = 0.5 - (max_l / 360.0)
+            else:
+                min_x = 0.5 + ((360 - min_l) / 360.0)
+                max_x = 0.5 + ((360 - max_l) / 360.0)
+            plt.axhline(con_range['min_con_vel'], xmin=min_x,
+                        xmax=max_x, color='blue')
+                        #linestyle='dashed')
+            plt.axhline(con_range['max_con_vel'], xmin=min_x,
+                        xmax=max_x, color='blue')
+                        #linestyle='dashed')
 
     plt.savefig(filename)
+    plt.close()
+    print("Plotted ", len(c), "opacity points to", filename)
+
     return
 
 
@@ -283,14 +292,24 @@ def output_spectra_catalogue(spectra):
          local_paths],
         names=['Day', 'Field', 'Source', 'Longitude', 'Latitude', 'Max_Flux',
                'Min_Opacity', 'Max_Opacity', 'RMS_Opacity', 'Min_Velocity',
-               'Max_Velocity', 'Used', 'Filename', 'Local_Path'])
+               'Max_Velocity', 'Used', 'Filename', 'Local_Path'],
+        meta={'ID': 'magmo_spectra',
+              'name': 'MAGMO Spectra ' + str(datetime.date.today())})
     votable = from_table(spectra_table)
     filename = "magmo-spectra.vot"
     writeto(votable, filename)
     print("Wrote out", i, "spectra to", filename)
 
 
-def output_field_catalogue(fields):
+def output_field_catalogue(fields, used_fields):
+    """
+    Write out a catalogue of the fields observed under the MAGMO project
+    with some basic stats for each field.
+
+    :param fields: The fields to be written.
+    :param used_fields: An aray of field ids which had spectra which were used.
+    :return: None
+    """
     rows = len(fields)
     days = np.zeros(rows, dtype=int)
     field_names = np.empty(rows, dtype=object)
@@ -298,6 +317,7 @@ def output_field_catalogue(fields):
     latitudes = np.zeros(rows)
     max_fluxes = np.zeros(rows)
     sn_ratios = np.zeros(rows)
+    strong = np.empty(rows, dtype=bool)
     used = np.empty(rows, dtype=bool)
 
     i = 0
@@ -309,13 +329,17 @@ def output_field_catalogue(fields):
         max_fluxes[i] = field.max_flux
         sn_ratios[i] = field.sn_ratio
         sn_ratios[i] = field.sn_ratio
-        used[i] = True if not field.used == 'Y' else False
+        strong[i] = True if field.used == 'Y' else False
+        used[i] = field.get_field_id() in used_fields
         i += 1
 
     fields_table = Table(
-        [days, field_names, longitudes, latitudes, max_fluxes, sn_ratios, used],
+        [days, field_names, longitudes, latitudes, max_fluxes, sn_ratios,
+         strong, used],
         names=['Day', 'Field', 'Longitude',
-               'Latitude', 'Max_Flux', 'SN_Ratio', 'Used'])
+               'Latitude', 'Max_Flux', 'SN_Ratio', 'Strong', 'Used'],
+        meta={'ID': 'magmo_fields',
+              'name': 'MAGMO Fields ' + str(datetime.date.today())})
     votable = from_table(fields_table)
     filename = "magmo-fields.vot"
     writeto(votable, filename)
@@ -330,19 +354,20 @@ def main():
     """
     start = time.time()
 
-    print("#### Started analysis on MAGMO spectra at %s ####" %
+    print("#### Started analysis of MAGMO spectra at %s ####" %
           time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start)))
 
     # Process Spectra
     spectra = read_spectra()
-    x, y, c = extract_lv(spectra)
+    x, y, c, used_fields = extract_lv(spectra)
     continuum_ranges = magmo.get_continuum_ranges()
-    plot_lv(x, y, c, 'magmo-lv.pdf', continuum_ranges)
+    plot_lv(x, y, c, 'magmo-lv.pdf', continuum_ranges, False)
+    plot_lv(x, y, c, 'magmo-lv-zoom.pdf', continuum_ranges, True)
     output_spectra_catalogue(spectra)
 
     # Process Fields
     fields = read_field_stats()
-    output_field_catalogue(fields)
+    output_field_catalogue(fields, used_fields)
 
     # also want
     # - Catalogue - Fields - day, field, peak, sn, coords, used
@@ -352,7 +377,7 @@ def main():
 
     # Report
     end = time.time()
-    print('#### Processing completed at %s ####' %
+    print('#### Analysis completed at %s ####' %
           time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end)))
     print('Processed spectra in %.02f s' %
           (end - start))
