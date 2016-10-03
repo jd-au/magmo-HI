@@ -81,6 +81,12 @@ def find_sources(day_dir_name, field_name):
 def read_sources(filename):
     print ("Extracting sources from " + filename)
     sources = []
+
+    if not os.path.exists(filename):
+        print ("Warning: File %s does not exist, skipping source read." % \
+               filename)
+        return sources
+
     src_votable = votable.parse(filename, pedantic=False)
     results = src_votable.get_first_table().array
     for row in results:
