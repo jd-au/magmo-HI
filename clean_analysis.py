@@ -20,7 +20,7 @@ dayDirName = "day" + day
 # Delete the generated files
 print "Removing analysis files"
 os.chdir(dayDirName)
-os.system("rm *.png")
+os.system("rm *plot.png")
 os.system("rm *.vot")
 os.system("rm *.xml")
 os.system("rm *.pdf")
