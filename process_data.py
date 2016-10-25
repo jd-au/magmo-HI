@@ -493,7 +493,7 @@ def build_cubes(day_dir_name, sources, band):
                 + ' slop=1.0 line='+ line + ' vis=' + ave_file \
                 + ' map=' + dirty_file + ' beam=' + beam_file
             magmo.run_os_cmd(cmd)
-            cmd = 'clean niters=2000 speed=+1 map=' + dirty_file + ' beam=' \
+            cmd = 'clean niters=250 speed=+1 map=' + dirty_file + ' beam=' \
                 + beam_file + ' out=' + clean_file
             magmo.run_os_cmd(cmd)
             cmd = 'restor model=' + clean_file + ' beam=' \
