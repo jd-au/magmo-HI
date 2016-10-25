@@ -226,7 +226,8 @@ def get_mean_continuum(spectrum, longitude, continuum_ranges):
     continuum_sample = spectrum.flux[bin_start:bin_end]
     # print ("...gave sample of", continuum_sample)
     mean_cont = np.mean(continuum_sample)
-    return mean_cont, continuum_start_vel, continuum_end_vel
+    sd_cont = np.std(continuum_sample)
+    return mean_cont, sd_cont, continuum_start_vel, continuum_end_vel
 
 
 def get_opacity(spectrum, mean):
@@ -298,6 +299,9 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
             + '<body>\n<h1>Spectra previews for day $day</h1>\n<table>\n')
         spectra_idx.write(t.substitute(day=day))
 
+        neg_mean = 0
+        all_cont_sd = []
+        all_opacity = []
         for field in field_list:
             spectra, source_ids = extract_spectra(day_dir_name, field)
             t = Template('<tr><td colspan=4><b>Field: ${field}</b></td></tr>\n' +
@@ -311,15 +315,19 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
                 src_data = source_ids.get(longitude)
                 name_prefix = field + '_src' + src_data[0]
                 idx += 1
-                mean, min_con_vel, max_con_vel = get_mean_continuum(spectrum,
-                                                                    longitude,
-                                                                    continuum_ranges)
+                mean, cont_sd, min_con_vel, max_con_vel = get_mean_continuum(
+                    spectrum,
+                    longitude,
+                    continuum_ranges)
                 if mean < 0:
                     print(("WARNING: Skipped spectrum %s with negative " +
                           "mean: %.5f") % (name_prefix, mean))
+                    neg_mean += 1
                     continue;
 
-                print ('Continuum mean of %s is %.5f Jy' % (name_prefix, mean))
+                print('Continuum mean of %s is %.5f Jy, sd %.5f' % (
+                    name_prefix, mean, cont_sd))
+                all_cont_sd.append(cont_sd)
                 opacity = get_opacity(spectrum, mean)
                 # print opacity
                 dir_prefix = day_dir_name + "/"
@@ -330,6 +338,7 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
                 filename = dir_prefix + name_prefix + '_opacity.votable.xml'
                 latitude = Angle(0 * u.deg) # todo: Read this from the spectra
                 output_spectra(spectrum, opacity, filename, longitude, latitude)
+                all_opacity.append(opacity)
 
                 t = Template('<tr><td>${img}</td><td>${longitude}</td>' +
                              '<td>${peak_flux}</td><td><a href="${img}">' +
@@ -338,6 +347,11 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
                                                longitude=longitude))
 
         spectra_idx.write('</table></body></html>\n')
+
+        print("Skipped %d spectra with negative mean continuum." % neg_mean)
+        print("Produced %d spectra with continuum sd of %.5f." % (
+            len(all_cont_sd), np.mean(all_cont_sd)))
+        return all_opacity
 
 
 def main():

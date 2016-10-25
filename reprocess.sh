@@ -18,7 +18,7 @@ echo "Processing ... "
 python process_data.py ${day} >& ${daydir}/process.log
 
 echo "Imaging ... "
-python image-1420.py ${day} >& temp.log
+python image-1420.py ${day} >& ${daydir}/image.log
 
 echo "Analysing ... "
 python analyse_data.py ${day} >& ${daydir}/analyse.log
