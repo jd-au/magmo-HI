@@ -1,3 +1,5 @@
+#!/usr/bin/env python -u
+
 # Analyse the produced HI spectra and extract stats and produce diagrams.
 #
 # This program reads the previously generated spectra and stats files in the day
@@ -9,6 +11,7 @@
 
 from __future__ import print_function, division
 
+from astropy.io import fits
 from astropy.io.votable import parse, from_table, writeto
 from astropy.table import Table
 
@@ -38,7 +41,6 @@ class Field(object):
 
         self.longitude = longitude
         self.latitude = latitude
-
 
     def get_field_id(self):
         return str(self.day) + "-" + str(self.name)
@@ -77,9 +79,9 @@ def read_spectra():
     spectra = []
 
     vo_files = glob.glob('day*/*.votable.xml')
-    print ("Reading {} spectrum files.".format(len(vo_files)))
+    print("Reading {} spectrum files.".format(len(vo_files)))
     for filename in sorted(vo_files):
-        #print ('Reading', filename)
+        # print ('Reading', filename)
         votable = parse(filename, pedantic=False)
         results = next(resource for resource in votable.resources if
                        resource.type == "results")
@@ -104,7 +106,7 @@ def read_spectra():
             i = 0
             for row in results_array:
                 opacity = row['opacity']
-                velocities[i] = row['velocity']/1000.0
+                velocities[i] = row['velocity'] / 1000.0
                 opacities[i] = opacity
                 fluxes[i] = row['flux']
                 i += 1
@@ -129,7 +131,7 @@ def read_field_stats():
     fields = []
 
     stats_files = glob.glob('day*/stats.csv')
-    print ("Reading {} day stats files.".format(len(stats_files)))
+    print("Reading {} day stats files.".format(len(stats_files)))
     for filename in sorted(stats_files):
         # print ('Reading', filename)
         day = int(filename.split('/')[0][3:])
@@ -143,7 +145,7 @@ def read_field_stats():
                 else:
                     if "-" in row[0]:
                         coords = row[0].split('-')
-                        coords[1] = "-"+coords[1]
+                        coords[1] = "-" + coords[1]
                     else:
                         coords = row[0].split('+')
 
@@ -157,7 +159,7 @@ def read_field_stats():
     return fields
 
 
-def extract_lv(spectra):
+def extract_lv(spectra, max_opacity, min_opacity):
     x = []
     y = []
     c = []
@@ -168,7 +170,7 @@ def extract_lv(spectra):
 
     for spectrum in spectra:
         opacities = spectrum.opacities
-        if np.max(opacities) > 4 or np.min(opacities) < -4:
+        if np.max(opacities) > max_opacity or np.min(opacities) < min_opacity:
             bad_spectra += 1
             spectrum.low_sn = True
             continue
@@ -181,8 +183,8 @@ def extract_lv(spectra):
             used_fields.append(field_id)
             num_fields += 1
 
-    print ("In %d fields read %d spectra of which %d had reasonable S/N. " % (
-        num_fields, len(spectra), len(spectra)-bad_spectra))
+    print("In %d fields read %d spectra of which %d had reasonable S/N. " % (
+        num_fields, len(spectra), len(spectra) - bad_spectra))
 
     return x, y, c, used_fields
 
@@ -196,24 +198,27 @@ def plot_lv(x, y, c, filename, continuum_ranges, zoom):
     :param y: The y-coordinate of each point (LSR velocity in km/s)
     :param c: The opacity fraction (1= transparent, 0=completely opaque)
     :param filename: The file to write the plot to.
+    :param continuum_ranges: The file to write the plot to.
+    :param zoom: Should the plot be zoomed in on the data region
+    ,
     :return: None
     """
     xmin = -120 if zoom else -180
-    xmax = 40 if zoom else 180
+    xmax = 30 if zoom else 180
     ymin = -300
     ymax = 300
 
     # print("X: %d, Y: %d, data: %d" % (len(x), len(y), len(c) ))
     val = np.clip(c, -0.005, 1.05)
-    #print val
-    fig = plt.figure(1, (12,6))
+    # print val
+    fig = plt.figure(1, (12, 6))
     # plt.subplots_adjust(hspace=0.5)
     plt.subplot(111, axisbg='black' if zoom else 'gray')
     plt.hexbin(x, y, val, cmap=plt.cm.gist_heat_r)
     # plt.scatter(x, y, cmap=plt.cm.YlOrRd_r)
     plt.axis([xmax, xmin, ymin, ymax])
     plt.title("Longitude-Velocity")
-    plt.xlabel('Galactic longitude (l)')
+    plt.xlabel('Galactic longitude (deg)')
     plt.ylabel('LSR Velocity (km/s)')
     cb = plt.colorbar()
     cb.set_label(r'$e^{(-\tau)}$')
@@ -221,8 +226,8 @@ def plot_lv(x, y, c, filename, continuum_ranges, zoom):
     # Add bands for the continuum ranges
     if not zoom:
         for con_range in continuum_ranges:
-            min_l = con_range['min_long'] #if con_range['min_long'] < 181 else 360 - con_range['min_long']
-            max_l = con_range['max_long'] #if con_range['max_long'] < 181 else 360 - con_range['max_long']
+            min_l = con_range['min_long']
+            max_l = con_range['max_long']
             if min_l < 181:
                 min_x = 0.5 - (min_l / 360.0)
                 max_x = 0.5 - (max_l / 360.0)
@@ -231,16 +236,123 @@ def plot_lv(x, y, c, filename, continuum_ranges, zoom):
                 max_x = 0.5 + ((360 - max_l) / 360.0)
             plt.axhline(con_range['min_con_vel'], xmin=min_x,
                         xmax=max_x, color='blue')
-                        #linestyle='dashed')
+            # linestyle='dashed')
             plt.axhline(con_range['max_con_vel'], xmin=min_x,
                         xmax=max_x, color='blue')
-                        #linestyle='dashed')
+            # linestyle='dashed')
+
+    plt.grid(color='White')
 
     plt.savefig(filename)
     plt.close()
     print("Plotted ", len(c), "opacity points to", filename)
 
     return
+
+
+def world_to_pixel(header, axis, value):
+    """
+    Calculate the pixel value for the provided world value using the WCS
+    keywords on the specific axis. The axis must be linear.
+    :param header: The FITS header describing the zxes.
+    :param axis:  The number of the target axis.
+    :param value: The world value to be converted.
+    :return: The pixel value.
+    """
+    ax = str(axis)
+    return int(header['CRPIX' + ax] + (value - header['CRVAL' + ax]) / header[
+        'CDELT' + ax])
+
+
+def get_lv_subset(data, header, l_min, l_max, v_min, v_max):
+    """
+    Extract a subset of velocity, longitude data based on physical bounds.
+
+    :param data: The two dimensional array of data.
+    :param header: The FITS header of the data with axes of longitude, velocity.
+    :param l_min: The minimum of the desired longitude range.
+    :param l_max: The maximum of the desired longitude range.
+    :param v_min: The minimum of the desired velocity range.
+    :param v_max: The maximum of the desired velocity range.
+    :return: A numpy array with only the data from the requested range.
+    """
+
+    l_start = world_to_pixel(header, 1, l_max)
+    l_end = world_to_pixel(header, 1, l_min)
+    v_start = world_to_pixel(header, 2, v_min)
+    v_end = world_to_pixel(header, 2, v_max)
+
+    return data[v_start:v_end, l_start:l_end]
+
+
+def plot_lv_image(x, y, c, filename):
+    """
+    Output a longitude-velocity plot of the provided data with the outline of
+    emission from the GASS III dataset plotted over the data.
+
+    :param x: The longitude value of each data point.
+    :param y: The velocity value of each data point.
+    :param c: The optical depth value of each data point.
+    :param filename: The file name of the plot.
+    :return: None
+    """
+    # Image dimensions
+    l_max = 30
+    l_min = -120
+    l_dpd = 1 / 0.08
+    l_size = int((l_max - l_min) * l_dpd)
+    v_max = 300
+    v_min = -300
+    v_dpkms = 1 / 0.8245
+    v_size = int((v_max - v_min) * v_dpkms)
+
+    val = np.clip(c, -0.005, 1.05)
+
+    plt.rcParams['xtick.direction'] = 'out'
+    plt.rcParams['ytick.direction'] = 'out'
+
+    dots_per_degree = l_dpd  # 4*3
+    data = np.ones((v_size, l_size))
+    xmax = data.shape[1]
+    ymax = data.shape[0]
+    for i in range(0, len(x)):
+        x_idx = xmax - int((x[i] - l_min) * dots_per_degree)
+        y_idx = ymax - int((y[i] - v_min) * v_dpkms)
+        data[y_idx, x_idx - 2:x_idx + 3] = val[i]
+
+    fig_size = plt.rcParams["figure.figsize"]
+    fig_size[1] = 3.5
+    plt.rcParams["figure.figsize"] = fig_size
+
+    ax = plt.subplot(111)
+    img = ax.imshow(data, cmap=plt.cm.gist_heat_r)
+    plt.title("Longitude-Velocity")
+    plt.xlabel('Galactic longitude (deg)')
+    plt.ylabel('LSR Velocity (km/s)')
+    cb = plt.colorbar(img, ax=ax)
+    cb.set_label(r'$e^{(-\tau)}$')
+
+    gass_lv = fits.open('gass-lv.fits')
+    gass_subset = get_lv_subset(gass_lv[0].data, gass_lv[0].header, l_min,
+                                l_max, v_min * 1000,
+                                v_max * 1000)
+
+    # Add an outline of the emission from GASS III
+    plt.contour(np.log10(np.flipud(gass_subset)), 1, cmap='Pastel2')
+
+    # Set the axis ticks and scales
+    x_step = int(20 * (gass_subset.shape[1] / (l_max - l_min)))
+    ax.set_xticks([i for i in range(gass_subset.shape[1], 0, -x_step)])
+    ax.set_xticklabels([i for i in range(l_min, l_max + 1, 20)])
+
+    y_step = int(100 * (gass_subset.shape[0] / (v_max - v_min)))
+    ax.set_yticks([i for i in range(0, gass_subset.shape[0], y_step)])
+    ax.set_yticklabels([i for i in range(v_max, v_min - 1, -100)])
+
+    plt.grid(color='antiquewhite')
+
+    plt.savefig(filename)
+    plt.close()
 
 
 def output_spectra_catalogue(spectra):
@@ -359,11 +471,17 @@ def main():
 
     # Process Spectra
     spectra = read_spectra()
-    x, y, c, used_fields = extract_lv(spectra)
+    x, y, c, used_fields = extract_lv(spectra, 4, -4)
     continuum_ranges = magmo.get_continuum_ranges()
     plot_lv(x, y, c, 'magmo-lv.pdf', continuum_ranges, False)
     plot_lv(x, y, c, 'magmo-lv-zoom.pdf', continuum_ranges, True)
+    plot_lv_image(x, y, c, 'magmo-lv-zoom-im.pdf')
     output_spectra_catalogue(spectra)
+
+    # Output only the really good spectra
+    x, y, c, temp = extract_lv(spectra, 2, -2)
+    plot_lv(x, y, c, 'magmo-lv_2_-2.pdf', continuum_ranges, False)
+    plot_lv_image(x, y, c, 'magmo-lv-zoom-im_2_-2.pdf')
 
     # Process Fields
     fields = read_field_stats()
@@ -387,4 +505,3 @@ def main():
 # Run the script if it is called from the command line
 if __name__ == "__main__":
     exit(main())
-
