@@ -346,8 +346,8 @@ def build_images(day_dir_name, sources, band, day):
                 + ' slop=1.0 ' \
                 + ' map=' + dirty_file + ' beam=' + beam_file
             magmo.run_os_cmd(cmd)
-            cmd = 'clean niters=2000 speed=+1 map=' + dirty_file + ' beam=' \
-                + beam_file + ' out=' + clean_file
+            cmd = 'clean niters=1000 mode=steer speed=+1 map=' + dirty_file \
+                  + ' beam=' + beam_file + ' out=' + clean_file
             magmo.run_os_cmd(cmd)
             cmd = 'restor options=mfs model=' + clean_file + ' beam=' \
                 + beam_file + ' map=' + dirty_file + ' out=' + restored_file
