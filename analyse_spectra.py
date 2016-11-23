@@ -14,13 +14,14 @@ from __future__ import print_function, division
 from astropy.io import fits
 from astropy.io.votable import parse, from_table, writeto
 from astropy.table import Table
-
+from scipy import ndimage
 import csv
 import datetime
 import glob
 import magmo
 import matplotlib.pyplot as plt
 import numpy as np
+from numpy import ma
 import os
 import time
 
@@ -210,6 +211,11 @@ def plot_lv(x, y, c, filename, continuum_ranges, zoom):
 
     # print("X: %d, Y: %d, data: %d" % (len(x), len(y), len(c) ))
     val = np.clip(c, -0.005, 1.05)
+
+    fig_size = plt.rcParams["figure.figsize"]
+    fig_size[1] = 4.5
+    plt.rcParams["figure.figsize"] = fig_size
+
     # print val
     fig = plt.figure(1, (12, 6))
     # plt.subplots_adjust(hspace=0.5)
@@ -220,7 +226,8 @@ def plot_lv(x, y, c, filename, continuum_ranges, zoom):
     plt.title("Longitude-Velocity")
     plt.xlabel('Galactic longitude (deg)')
     plt.ylabel('LSR Velocity (km/s)')
-    cb = plt.colorbar()
+    cb = plt.colorbar(orientation='horizontal')
+    #cb = plt.colorbar()
     cb.set_label(r'$e^{(-\tau)}$')
 
     # Add bands for the continuum ranges
@@ -312,24 +319,32 @@ def plot_lv_image(x, y, c, filename):
     plt.rcParams['ytick.direction'] = 'out'
 
     dots_per_degree = l_dpd  # 4*3
-    data = np.ones((v_size, l_size))
+    data = ma.array(np.ones((v_size, l_size)), mask=True)
+    print(data)
     xmax = data.shape[1]
     ymax = data.shape[0]
     for i in range(0, len(x)):
         x_idx = xmax - int((x[i] - l_min) * dots_per_degree)
         y_idx = ymax - int((y[i] - v_min) * v_dpkms)
-        data[y_idx, x_idx - 2:x_idx + 3] = val[i]
+        data[y_idx, x_idx - 3:x_idx + 4] = val[i]
 
     fig_size = plt.rcParams["figure.figsize"]
-    fig_size[1] = 3.5
+    fig_size[1] = 4.5
     plt.rcParams["figure.figsize"] = fig_size
 
+    smoothed_data = ndimage.gaussian_filter(data, sigma=2, order=0)
+
     ax = plt.subplot(111)
-    img = ax.imshow(data, cmap=plt.cm.gist_heat_r)
+    img = ax.imshow(smoothed_data, cmap=plt.cm.gist_heat_r)
     plt.title("Longitude-Velocity")
     plt.xlabel('Galactic longitude (deg)')
     plt.ylabel('LSR Velocity (km/s)')
-    cb = plt.colorbar(img, ax=ax)
+
+    #cbaxes = plt.add_axes([0.05, 0.05, 0.9, 0.025])
+    #cb = plt.colorbar(cax=cbaxes, mappable=mappable, orientation='horizontal')
+    cb = plt.colorbar(img, ax=ax, orientation='horizontal')
+
+    #cb = plt.colorbar(img, ax=ax)
     cb.set_label(r'$e^{(-\tau)}$')
 
     gass_lv = fits.open('gass-lv.fits')
