@@ -346,7 +346,7 @@ def build_images(day_dir_name, sources, band, day):
                 + ' slop=1.0 ' \
                 + ' map=' + dirty_file + ' beam=' + beam_file
             magmo.run_os_cmd(cmd)
-            cmd = 'clean niters=1000 mode=steer speed=+1 map=' + dirty_file \
+            cmd = 'clean niters=2000 speed=+1 map=' + dirty_file \
                   + ' beam=' + beam_file + ' out=' + clean_file
             magmo.run_os_cmd(cmd)
             cmd = 'restor options=mfs model=' + clean_file + ' beam=' \
@@ -493,7 +493,7 @@ def build_cubes(day_dir_name, sources, band):
                 + ' slop=1.0 line='+ line + ' vis=' + ave_file \
                 + ' map=' + dirty_file + ' beam=' + beam_file
             magmo.run_os_cmd(cmd)
-            cmd = 'clean niters=250 speed=+1 map=' + dirty_file + ' beam=' \
+            cmd = 'clean niters=500 mode=steer speed=+1 map=' + dirty_file + ' beam=' \
                 + beam_file + ' out=' + clean_file
             magmo.run_os_cmd(cmd)
             cmd = 'restor model=' + clean_file + ' beam=' \
