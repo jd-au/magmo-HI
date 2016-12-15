@@ -21,7 +21,7 @@ class CommandFailedError(Exception):
 # functions to be made common
 def get_metadata_file_path(filename):
     """
-    Take a metadata file name and get the path to it givren that it will be in
+    Take a metadata file name and get the path to it given that it will be in
     the same folder as this script.
 
     :param filename: The filename of the metadata file.

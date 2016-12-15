@@ -6,6 +6,7 @@
 from __future__ import print_function, division
 
 import magmo
+import sgps
 import os
 import sys
 import time
@@ -20,6 +21,7 @@ from astropy.io.votable.tree import Param,Info
 from astropy.io.votable import from_table, writeto
 from astropy import units as u
 import matplotlib.pyplot as plt
+import math
 import numpy as np
 import numpy.core.records as rec
 
@@ -185,7 +187,7 @@ def extract_spectra(daydirname, field):
             names='plane,velocity,flux')
         c = SkyCoord(src[0], src[1], frame='icrs', unit="deg")
         spectra[c.galactic.l] = spectrum_array
-        source_ids[c.galactic.l] = [src[2], src[3]]
+        source_ids[c.galactic.l] = [src[2], src[3], c]
     del image
     del header
     hdulist.close()
@@ -206,13 +208,13 @@ def get_mean_continuum(spectrum, longitude, continuum_ranges):
     :return: A single float which is the mean continuum flux.
     """
     continuum_start_vel, continuum_end_vel = magmo.lookup_continuum_range(
-        continuum_ranges, int(longitude.degree))
+        continuum_ranges, int(longitude))
 
     print(
         "Looking for velocity range %d to %d in data of %d to %d at longitude %.3f" %
         (continuum_start_vel, continuum_end_vel,
          np.min(spectrum.velocity) / 1000.0,
-         np.max(spectrum.velocity) / 1000.0, longitude.degree))
+         np.max(spectrum.velocity) / 1000.0, longitude))
 
     continuum_range = np.where(
         continuum_start_vel*1000 < spectrum.velocity)
@@ -273,7 +275,40 @@ def plot_spectrum(x, y, filename, title, con_start_vel, con_end_vel):
     return
 
 
-def output_spectra(spectrum, opacity, filename, longitude, latitude):
+def plot_emission_spectrum(velocity, em_mean, em_std, filename, title, con_start_vel, con_end_vel):
+    """
+    Output a plot of emission vs LSR velocity to a specified file.
+
+    :param velocity: The velocity data
+    :param em_mean: The mean temperature values for each velocity step
+    :param em_std: The standard deviation in temperature values for each velocity step
+    :param filename: The file the plot should be written to. Should be
+         an .eps or .pdf file.
+    :param title: The title for the plot
+    :param con_start_vel: The minimum velocity that the continuum was measured at.
+    :param con_end_vel: The maximum velocity that the continuum was measured at.
+    """
+    fig = plt.figure()
+    plt.plot(velocity/1000, em_mean)
+
+    em_max = em_mean + em_std
+    em_min = em_mean - em_std
+    plt.fill_between(velocity/1000, em_min, em_max, facecolor='lightgray', color='lightgray')
+
+    plt.axvline(con_start_vel, color='g', linestyle='dashed')
+    plt.axvline(con_end_vel, color='g', linestyle='dashed')
+
+    plt.xlabel(r'Velocity relative to LSR (km/s)')
+    plt.ylabel(r'$T_B$ (K)')
+    plt.title(title)
+    plt.grid(True)
+    plt.savefig(filename)
+    #plt.show()
+    plt.close()
+    return
+
+
+def output_spectra(spectrum, opacity, filename, longitude, latitude, em_mean, em_std):
     """
     Write the spectrum (velocity, flux and opacity) to a votable format file.
 
@@ -283,16 +318,93 @@ def output_spectra(spectrum, opacity, filename, longitude, latitude):
     :param longitude: The galactic longitude of the target object
     :param latitude: The galactic latitude of the target object
     """
-    table = Table([spectrum.plane, spectrum.velocity, opacity, spectrum.flux],
-                  names=('plane', 'velocity', 'opacity', 'flux'),
-                  meta={'name': 'Opacity', 'id' : 'opacity'})
+    table = Table(meta={'name': filename, 'id': 'opacity'})
+    table.add_column(Column(name='plane', data=spectrum.plane))
+    table.add_column(Column(name='velocity', data=spectrum.velocity, unit='m/s'))
+    table.add_column(Column(name='opacity', data=opacity))
+    table.add_column(Column(name='flux', data=spectrum.flux, unit='Jy/beam'))
+    table.add_column(Column(name='em_mean', data=em_mean, unit='K'))
+    table.add_column(Column(name='em_std', data=em_std, unit='K'))
+
     votable = from_table(table)
     votable.infos.append(Info('longitude', 'longitude', longitude.value))
     votable.infos.append(Info('latitude', 'latitude', latitude.value))
     writeto(votable, filename)
 
 
+def output_emission_spectra(filename, longitude, latitude, velocity, em_mean,
+                            em_std, ems):
+    """
+    Write the emission spectrum (velocity, flux and opacity) to a votable format
+    file.
+
+    :param filename:  The filename to be created
+    :param longitude: The galactic longitude of the target object
+    :param latitude: The galactic latitude of the target object
+    :param velocity:
+    :param em_mean:
+    :param em_std:
+    :param ems:
+    """
+    table = Table(meta={'name': filename, 'id': 'emission'})
+    table.add_column(Column(name='velocity', data=velocity, unit='m/s'))
+    table.add_column(Column(name='em_mean', data=em_mean, unit='K'))
+    table.add_column(Column(name='em_std', data=em_std, unit='K'))
+    for i in range(len(ems)):
+        table.add_column(Column(name='em_'+str(i), data=ems[i].flux, unit='K'))
+
+    votable = from_table(table)
+    votable.infos.append(Info('longitude', 'longitude', longitude.value))
+    votable.infos.append(Info('latitude', 'latitude', latitude.value))
+    writeto(votable, filename)
+
+
+def calc_offset_points(longitude, latitude, beam_size, num_points=6):
+    spacing = 2.0 * math.pi / float(num_points)
+    points = []
+    for i in range(0, num_points):
+        angle = spacing * i
+        l = longitude + math.sin(angle)*beam_size
+        b = latitude + math.cos(angle)*beam_size
+        coord = SkyCoord(l, b, frame='galactic', unit="deg")
+        print ("Point at angle %f is %s" % (math.degrees(angle), str(coord)))
+        points.append(coord)
+
+    return points
+
+
+def get_emission_spectra(centre, velocities, file_list, filename_prefix):
+    """
+    Extract SGPS emission spectra around a central point.
+
+    :param centre: A SkyCoord containing the location of the central point
+    :param velocities: The velocities list sothat the emission data can be matched.
+    :param file_list: A list of dictionaries describing the SGPS files.
+    :return: An array fo the mean and standard deviation of emission at each velocity.
+    """
+
+    #file_list = sgps.get_hi_file_list()
+    coords = calc_offset_points(centre.galactic.l.value,
+                                centre.galactic.b.value, 0.03611)
+    ems = sgps.extract_spectra(coords, file_list)
+    if ems:
+        all_em = np.array([ems[i].flux for i in range(len(ems))])
+        em_std = np.std(all_em, axis=0)
+        em_mean = np.mean(all_em, axis=0)
+        em_std_interp = np.interp(velocities, ems[0].velocity, em_std)
+        em_mean_interp = np.interp(velocities, ems[0].velocity, em_mean)
+
+        output_emission_spectra(filename_prefix + '_emission.votable.xml',
+                                centre.galactic.l, centre.galactic.b,
+                                ems[0].velocity, em_mean, em_std, ems)
+
+        return em_mean_interp, em_std_interp
+
+    return [], []
+
+
 def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
+    file_list = sgps.get_hi_file_list()
     with open(day_dir_name + '/spectra.html', 'w') as spectra_idx:
         t = Template(
             '<html>\n<head><title>D$day Spectra</title></head>\n'
@@ -317,7 +429,7 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
                 idx += 1
                 mean, cont_sd, min_con_vel, max_con_vel = get_mean_continuum(
                     spectrum,
-                    longitude,
+                    longitude.degree,
                     continuum_ranges)
                 if mean < 0:
                     print(("WARNING: Skipped spectrum %s with negative " +
@@ -336,8 +448,18 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
                               "Spectra for source {0} in field {1}".format(
                                   src_data[0], field), min_con_vel, max_con_vel)
                 filename = dir_prefix + name_prefix + '_opacity.votable.xml'
-                latitude = Angle(0 * u.deg) # todo: Read this from the spectra
-                output_spectra(spectrum, opacity, filename, longitude, latitude)
+                latitude = src_data[2].galactic.b
+
+                em_mean, em_std = get_emission_spectra(src_data[2],
+                                                       spectrum.velocity,
+                                                       file_list, dir_prefix + name_prefix)
+                plot_emission_spectrum(spectrum.velocity, em_mean, em_std,
+                                       dir_prefix + name_prefix + "_emission.png",
+                                       "Emission around source {0} in field {1}".format(
+                                           src_data[0], field), min_con_vel,
+                                       max_con_vel)
+                output_spectra(spectrum, opacity, filename, longitude, latitude,
+                               em_mean, em_std)
                 all_opacity.append(opacity)
 
                 t = Template('<tr><td>${img}</td><td>${longitude}</td>' +
