@@ -101,3 +101,6 @@ magmo-days-full.csv
 filelist
 .credentials
 day??
+*.vot
+old-day21
+prev_runs_rsaa

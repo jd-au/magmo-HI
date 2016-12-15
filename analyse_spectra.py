@@ -15,6 +15,7 @@ from astropy.io import fits
 from astropy.io.votable import parse, from_table, writeto
 from astropy.table import Table
 from scipy import ndimage
+import analyse_data
 import csv
 import datetime
 import glob
@@ -52,17 +53,22 @@ class Spectrum(object):
 
     """
 
-    def __init__(self, day, field_name, src_id, longitude, latitude, velocities,
-                 opacities, fluxes):
+    def __init__(self, day, field_name, src_id, longitude, latitude, velocity,
+                 opacities, flux):
         self.day = day
         self.field_name = field_name
         self.src_id = src_id
         self.longitude = longitude
         self.latitude = latitude
-        self.velocities = velocities
+        self.velocity = velocity
         self.opacities = opacities
-        self.fluxes = fluxes
+        self.flux = flux
         self.low_sn = None
+        self.range = 0
+        self.opacity_range = 0
+        self.max_s_max_n = 0
+        self.continuum_sd = 0
+        self.rating = 'A'
 
     def get_field_id(self):
         return str(self.day) + "-" + str(self.field_name)
@@ -116,6 +122,20 @@ def read_spectra():
             spectrum = Spectrum(str(parts[0][3:]), parts[1], field[1][3:],
                                 gal_long, gal_lat, velocities, opacities,
                                 fluxes)
+            min_opacity = np.min(spectrum.opacities)
+            max_opacity = np.max(spectrum.opacities)
+
+            continuum_ranges = magmo.get_continuum_ranges()
+
+            opacity_range = max_opacity - min_opacity
+            max_s_max_n = (1 - min_opacity) / (max_opacity - 1)
+            continuum_sd = calc_continuum_sd(spectrum, continuum_ranges)
+            rating = calc_rating(opacity_range, max_s_max_n, continuum_sd)
+
+            spectrum.opacity_range = opacity_range
+            spectrum.max_s_max_n = max_s_max_n
+            spectrum.continuum_sd = continuum_sd
+            spectrum.rating = rating
             spectra.append(spectrum)
 
     return spectra
@@ -160,7 +180,7 @@ def read_field_stats():
     return fields
 
 
-def extract_lv(spectra, max_opacity, min_opacity):
+def extract_lv(spectra, min_rating='C'):
     x = []
     y = []
     c = []
@@ -171,11 +191,15 @@ def extract_lv(spectra, max_opacity, min_opacity):
 
     for spectrum in spectra:
         opacities = spectrum.opacities
-        if np.max(opacities) > max_opacity or np.min(opacities) < min_opacity:
+        if spectrum.rating > min_rating:
             bad_spectra += 1
             spectrum.low_sn = True
             continue
-        y = np.concatenate((y, spectrum.velocities))
+        #if np.max(opacities) > max_opacity or np.min(opacities) < min_opacity:
+        #    bad_spectra += 1
+        #   spectrum.low_sn = True
+        #    continue
+        y = np.concatenate((y, spectrum.velocity))
         c = np.concatenate((c, opacities))
         x = np.concatenate((x, np.full(len(opacities), spectrum.longitude)))
         field_id = spectrum.get_field_id()
@@ -320,7 +344,7 @@ def plot_lv_image(x, y, c, filename):
 
     dots_per_degree = l_dpd  # 4*3
     data = ma.array(np.ones((v_size, l_size)), mask=True)
-    print(data)
+    # print(data)
     xmax = data.shape[1]
     ymax = data.shape[0]
     for i in range(0, len(x)):
@@ -370,6 +394,44 @@ def plot_lv_image(x, y, c, filename):
     plt.close()
 
 
+def calc_continuum_sd(spectrum, continuum_ranges):
+    """
+    Calulate the standard deviaition of opacity in the velocity range
+    designated as continuum for the spectrum's longitude. This gives a measure
+    of the noise in wat should be an otherwise continuum only part of the
+    spectrum.
+
+    :param spectrum: The spectrum object being analysed.
+    :param continuum_ranges: The defined contionuum ranges
+    :return: The opacity standard deviation.
+    """
+
+    continuum_start_vel, continuum_end_vel = magmo.lookup_continuum_range(
+        continuum_ranges, int(spectrum.longitude))
+    continuum_range = np.where(
+        continuum_start_vel < spectrum.velocity)
+    bin_start = continuum_range[0][0]
+    continuum_range = np.where(
+        spectrum.velocity < continuum_end_vel)
+    bin_end = continuum_range[0][-1]
+    sd_cont = np.std(spectrum.opacities[bin_start:bin_end])
+    return sd_cont
+
+
+def calc_rating(opacity_range, max_s_max_n, continuum_sd):
+    rating_codes = 'ABCDEF'
+    rating = 0
+
+    if opacity_range > 1.5:
+        rating += 1
+    if max_s_max_n < 3:
+        rating += 1
+    if continuum_sd*3 > 1:
+        rating += 1
+
+    return rating_codes[rating]
+
+
 def output_spectra_catalogue(spectra):
     """
     Output the list of spectrum stats to a VOTable file magmo-spectra.vot
@@ -389,6 +451,10 @@ def output_spectra_catalogue(spectra):
     max_velocity = np.zeros(rows)
     min_velocity = np.zeros(rows)
     rms_opacity = np.zeros(rows)
+    opacity_range = np.zeros(rows)
+    continuum_sd = np.zeros(rows)
+    max_s_max_n = np.zeros(rows)
+    rating = np.empty(rows, dtype=object)
     used = np.empty(rows, dtype=bool)
     filenames = np.empty(rows, dtype=object)
     local_paths = np.empty(rows, dtype=object)
@@ -401,13 +467,19 @@ def output_spectra_catalogue(spectra):
         sources[i] = spectrum.src_id
         longitudes[i] = spectrum.longitude
         latitudes[i] = spectrum.latitude
-        max_flux[i] = np.max(spectrum.fluxes)
+        max_flux[i] = np.max(spectrum.flux)
         min_opacity[i] = np.min(spectrum.opacities)
         max_opacity[i] = np.max(spectrum.opacities)
         rms_opacity[i] = np.sqrt(np.mean(np.square(spectrum.opacities)))
-        min_velocity[i] = np.min(spectrum.velocities)
-        max_velocity[i] = np.max(spectrum.velocities)
-        used[i] = True if not spectrum.low_sn else False
+        min_velocity[i] = np.min(spectrum.velocity)
+        max_velocity[i] = np.max(spectrum.velocity)
+
+        opacity_range[i] = spectrum.opacity_range
+        max_s_max_n[i] = spectrum.max_s_max_n
+        continuum_sd[i] = spectrum.continuum_sd
+        rating[i] = spectrum.rating
+
+        used[i] = not spectrum.low_sn
         filenames[i] = 'day' + spectrum.day + '/' + spectrum.field_name + \
                        "_src" + spectrum.src_id + "_plot.png"
         local_paths[i] = base_path + '/' + filenames[i]
@@ -415,17 +487,23 @@ def output_spectra_catalogue(spectra):
 
     spectra_table = Table(
         [days, fields, sources, longitudes, latitudes, max_flux, min_opacity,
-         max_opacity, rms_opacity, min_velocity, max_velocity, used, filenames,
-         local_paths],
+         max_opacity, rms_opacity, min_velocity, max_velocity, used,
+         opacity_range, max_s_max_n, continuum_sd, rating,
+         filenames, local_paths],
         names=['Day', 'Field', 'Source', 'Longitude', 'Latitude', 'Max_Flux',
                'Min_Opacity', 'Max_Opacity', 'RMS_Opacity', 'Min_Velocity',
-               'Max_Velocity', 'Used', 'Filename', 'Local_Path'],
+               'Max_Velocity', 'Used', 'Opacity_Range', 'Max_S_Max_N',
+               'Continuum_SD', 'Rating', 'Filename', 'Local_Path'],
         meta={'ID': 'magmo_spectra',
               'name': 'MAGMO Spectra ' + str(datetime.date.today())})
     votable = from_table(spectra_table)
     filename = "magmo-spectra.vot"
     writeto(votable, filename)
     print("Wrote out", i, "spectra to", filename)
+    for grade in "ABCDEF":
+        num_rating = len(np.where(rating == grade)[0])
+        print ("%s: %3d" % (grade, num_rating))
+    print ("Mean continuum sd %f" % np.mean(continuum_sd))
 
 
 def output_field_catalogue(fields, used_fields):
@@ -486,7 +564,7 @@ def main():
 
     # Process Spectra
     spectra = read_spectra()
-    x, y, c, used_fields = extract_lv(spectra, 4, -4)
+    x, y, c, used_fields = extract_lv(spectra)
     continuum_ranges = magmo.get_continuum_ranges()
     plot_lv(x, y, c, 'magmo-lv.pdf', continuum_ranges, False)
     plot_lv(x, y, c, 'magmo-lv-zoom.pdf', continuum_ranges, True)
@@ -494,9 +572,9 @@ def main():
     output_spectra_catalogue(spectra)
 
     # Output only the really good spectra
-    x, y, c, temp = extract_lv(spectra, 2, -2)
-    plot_lv(x, y, c, 'magmo-lv_2_-2.pdf', continuum_ranges, False)
-    plot_lv_image(x, y, c, 'magmo-lv-zoom-im_2_-2.pdf')
+    x, y, c, temp = extract_lv(spectra, min_rating='B')
+    plot_lv(x, y, c, 'magmo-lv_AB.pdf', continuum_ranges, False)
+    plot_lv_image(x, y, c, 'magmo-lv-zoom-im_AB.pdf')
 
     # Process Fields
     fields = read_field_stats()
