@@ -103,7 +103,7 @@ for freq in freqList:
 # Rename any 1420.5 folders to remove the decimal
 uv_dirs = glob.glob('*.[0-9][0-9][0-9][0-9].[0-9]')
 for uvdir in uv_dirs:
-    if os.exists(uvdir[:-2]):
+    if os.path.exists(uvdir[:-2]):
         logging.warning("Duplicate folders exist for " + uvdir)
     else:
         os.rename(uvdir, uvdir[:-2])
