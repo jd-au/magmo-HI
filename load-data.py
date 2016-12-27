@@ -1,3 +1,5 @@
+#!/usr/bin/env python -u
+
 # Uses atlod to extract the HI spectra and the 2GHz continuum for a day
 #
 # This program extracts the HI spectra (1.42 GHz) and continuum (2 GHz) data
@@ -7,12 +9,15 @@
 # Author James Dempsey
 # Date 7 Jul 2016
 
+from __future__ import print_function, division
+
 import csv
 import glob
-import sys
+import logging
 import magmo
 import os
 import shutil
+import sys
 import time
 
 
@@ -64,11 +69,11 @@ start = time.time()
 # Read metadata for the day (file pattern fragments etc)
 dayRow = get_day_data(day)
 if dayRow is None:
-    print "Day %s is not defined." % (day)
+    print ("Day %s is not defined." % (day))
     exit(1)
-print "#### Started loading MAGMO day %s at %s ####" % \
-      (day, time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start)))
-print dayRow
+print ("#### Started loading MAGMO day %s at %s ####" % \
+      (day, time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start))))
+print (dayRow)
 
 # Make day directory
 dayDirName = "day" + day
@@ -98,7 +103,10 @@ for freq in freqList:
 # Rename any 1420.5 folders to remove the decimal
 uv_dirs = glob.glob('*.[0-9][0-9][0-9][0-9].[0-9]')
 for uvdir in uv_dirs:
-    os.rename(uvdir, uvdir[:-2])
+    if os.exists(uvdir[:-2]):
+        logging.warning("Duplicate folders exist for " + uvdir)
+    else:
+        os.rename(uvdir, uvdir[:-2])
 os.chdir("..")
 
 
@@ -120,6 +128,6 @@ for uvDir in os.listdir(dayDirName):
 
 # Report
 end = time.time()
-print '#### Loading completed at %s ####' \
-      % (time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end)))
-print 'Processed in %.02f s' % (end - start)
+print ('#### Loading completed at %s ####' \
+      % (time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end))))
+print ('Processed in %.02f s' % (end - start))
