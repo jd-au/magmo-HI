@@ -1,3 +1,5 @@
+#!/usr/bin/env python -u
+
 # Find sources in the data and produce spectra for each suitable source.
 
 # Author James Dempsey
@@ -288,6 +290,12 @@ def plot_emission_spectrum(velocity, em_mean, em_std, filename, title, con_start
     :param con_start_vel: The minimum velocity that the continuum was measured at.
     :param con_end_vel: The maximum velocity that the continuum was measured at.
     """
+
+    if len(em_mean) == 0:
+        if os.path.exists(filename):
+            os.remove(filename)
+        return
+
     fig = plt.figure()
     plt.plot(velocity/1000, em_mean)
 
@@ -323,8 +331,10 @@ def output_spectra(spectrum, opacity, filename, longitude, latitude, em_mean, em
     table.add_column(Column(name='velocity', data=spectrum.velocity, unit='m/s'))
     table.add_column(Column(name='opacity', data=opacity))
     table.add_column(Column(name='flux', data=spectrum.flux, unit='Jy/beam'))
-    table.add_column(Column(name='em_mean', data=em_mean, unit='K'))
-    table.add_column(Column(name='em_std', data=em_std, unit='K'))
+    if len(em_mean) > 0:
+        # The emission may not be available, so don't include it if not
+        table.add_column(Column(name='em_mean', data=em_mean, unit='K'))
+        table.add_column(Column(name='em_std', data=em_std, unit='K'))
 
     votable = from_table(table)
     votable.infos.append(Info('longitude', 'longitude', longitude.value))
@@ -384,6 +394,7 @@ def get_emission_spectra(centre, velocities, file_list, filename_prefix):
     """
 
     #file_list = sgps.get_hi_file_list()
+    filename = filename_prefix + '_emission.votable.xml'
     coords = calc_offset_points(centre.galactic.l.value,
                                 centre.galactic.b.value, 0.03611)
     ems = sgps.extract_spectra(coords, file_list)
@@ -394,12 +405,14 @@ def get_emission_spectra(centre, velocities, file_list, filename_prefix):
         em_std_interp = np.interp(velocities, ems[0].velocity, em_std)
         em_mean_interp = np.interp(velocities, ems[0].velocity, em_mean)
 
-        output_emission_spectra(filename_prefix + '_emission.votable.xml',
+        output_emission_spectra(filename,
                                 centre.galactic.l, centre.galactic.b,
                                 ems[0].velocity, em_mean, em_std, ems)
 
         return em_mean_interp, em_std_interp
 
+    if os.path.exists(filename):
+        os.remove(filename)
     return [], []
 
 
