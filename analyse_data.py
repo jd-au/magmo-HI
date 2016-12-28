@@ -220,6 +220,9 @@ def get_mean_continuum(spectrum, longitude, continuum_ranges):
 
     continuum_range = np.where(
         continuum_start_vel*1000 < spectrum.velocity)
+    if len(continuum_range) ==0:
+        return None, None, continuum_start_vel, continuum_end_vel
+
     bin_start = continuum_range[0][0]
     continuum_range = np.where(
         spectrum.velocity < continuum_end_vel*1000)
@@ -425,6 +428,7 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
         spectra_idx.write(t.substitute(day=day))
 
         neg_mean = 0
+        no_mean = 0
         all_cont_sd = []
         all_opacity = []
         for field in field_list:
@@ -444,6 +448,11 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
                     spectrum,
                     longitude.degree,
                     continuum_ranges)
+                if mean is None:
+                    print("WARNING: Skipped spectrum %s with no continuum data" % (name_prefix, mean))
+                    no_mean += 1
+                    continue;
+
                 if mean < 0:
                     print(("WARNING: Skipped spectrum %s with negative " +
                           "mean: %.5f") % (name_prefix, mean))
@@ -482,6 +491,9 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
                                                longitude=longitude))
 
         spectra_idx.write('</table></body></html>\n')
+
+        if no_mean > 0:
+            print("Skipped %d spectra with no continuum data." % no_mean)
 
         print("Skipped %d spectra with negative mean continuum." % neg_mean)
         print("Produced %d spectra with continuum sd of %.5f." % (
