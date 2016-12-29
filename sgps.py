@@ -15,7 +15,7 @@ from astropy.io import fits
 from astropy.wcs import WCS
 
 
-_SGPS_FOLDER = "/priv/myrtle1/gaskap/sgps/"
+_SGPS_FOLDER = "/priv/myrtle1/gaskap/SGPS/"
 _SGPS_HI_PATTERN = '*hi.fits.gz'
 
 
@@ -40,6 +40,8 @@ def get_hi_file_list():
     """
     hi_files = []
     sgps_path = get_sgps_location()
+    if not os.path.exists(sgps_path):
+        logging.warning("Unable to find SGPS files at " + sgps_path)
     fits_files = glob.glob1(sgps_path, _SGPS_HI_PATTERN)
     for fits_file in fits_files:
         fits_path = os.path.join(sgps_path, fits_file)
