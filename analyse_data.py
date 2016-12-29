@@ -414,6 +414,7 @@ def get_emission_spectra(centre, velocities, file_list, filename_prefix):
 
         return em_mean_interp, em_std_interp
 
+    print("WARNING: Unable to find emission data for " + str(centre))
     if os.path.exists(filename):
         os.remove(filename)
     return [], []
@@ -434,8 +435,8 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
         for field in field_list:
             spectra, source_ids = extract_spectra(day_dir_name, field)
             t = Template('<tr><td colspan=4><b>Field: ${field}</b></td></tr>\n' +
-                         '<tr><td>Image Name</td><td> Source Longitude </td>' +
-                         '<td>Peak Flux</td><td>Spectra</td></tr>\n')
+                         '<tr><td>Image Name</td><td>Details</td>' +
+                         '<td>Absorption</td><td>Emission</td></tr>\n')
             spectra_idx.write(t.substitute(field=field))
 
             idx = 0
@@ -475,6 +476,7 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
                 em_mean, em_std = get_emission_spectra(src_data[2],
                                                        spectrum.velocity,
                                                        file_list, dir_prefix + name_prefix)
+                em_img_name = name_prefix + "_emission.png"
                 plot_emission_spectrum(spectrum.velocity, em_mean, em_std,
                                        dir_prefix + name_prefix + "_emission.png",
                                        "Emission around source {0} in field {1}".format(
@@ -484,11 +486,14 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
                                em_mean, em_std)
                 all_opacity.append(opacity)
 
-                t = Template('<tr><td>${img}</td><td>${longitude}</td>' +
-                             '<td>${peak_flux}</td><td><a href="${img}">' +
-                             '<img src="${img}" width="500px"></a></td></tr>\n')
-                spectra_idx.write(t.substitute(img=img_name, peak_flux=src_data[1],
-                                               longitude=longitude))
+                t = Template('<tr><td>${img}</td><td>l:&nbsp;${longitude}<br/>' +
+                             'Peak:&nbsp;${peak_flux}&nbsp;Jy<br/>Mean:&nbsp;${mean}&nbsp;Jy<br/>'
+                             'Cont&nbsp;SD:&nbsp;${cont_sd}</td><td><a href="${img}">' +
+                             '<img src="${img}" width="500px"></a></td><td><a href="${em_img}">' +
+                             '<img src="${em_img}" width="500px"></a></td></tr>\n')
+                spectra_idx.write(t.substitute(img=img_name, em_img=em_img_name, peak_flux=src_data[1],
+                                               longitude=longitude, mean=mean, cont_sd=cont_sd))
+
 
         spectra_idx.write('</table></body></html>\n')
 
