@@ -150,7 +150,7 @@ def find_edges(fluxes, num_edge_chan):
 
 
 def extract_spectra(daydirname, field):
-    num_edge_chan = 10  # todo: make this a velocity relative value
+    num_edge_chan = 10
     fits_filename = "{0}/1420/magmo-{1}_1420_sl_restor.fits".format(daydirname,
                                                                     field)
     src_filename = "{0}/{1}_src_comp.vot".format(daydirname, field)
@@ -168,6 +168,10 @@ def extract_spectra(daydirname, field):
     header = hdulist[0].header
     w = WCS(header)
     index = np.arange(header['NAXIS3'])
+    beam_maj = header['BMAJ'] * 60 * 60
+    beam_min = header['BMIN'] * 60 * 60
+    beam_area = math.radians(header['BMAJ']) * math.radians(header['BMIN'])
+    print ("Beam was %f x %f arcsec giving area of %f radians^2." % (beam_maj, beam_min, beam_area))
     velocities = w.wcs_pix2world(10,10,index[:],0,0)[2]
     for src in sources:
         pix = w.wcs_world2pix(src[0], src[1], 0, 0, 1)
@@ -189,7 +193,7 @@ def extract_spectra(daydirname, field):
             names='plane,velocity,flux')
         c = SkyCoord(src[0], src[1], frame='icrs', unit="deg")
         spectra[c.galactic.l] = spectrum_array
-        source_ids[c.galactic.l] = [src[2], src[3], c]
+        source_ids[c.galactic.l] = [src[2], src[3], c, beam_area]
     del image
     del header
     hdulist.close()
@@ -249,6 +253,23 @@ def get_opacity(spectrum, mean):
     # print spectrum.flux
     # print spectrum.flux/mean
     return spectrum.flux/mean
+
+
+def get_temp_bright(spectrum, beam_area, wavelen=0.210996048, ):
+    """
+    Calculate the brightness temperature (T_B) for the spectrum. This effectively converts the spectrum from units
+    of Jy/beam to K.
+
+    :param spectrum: The spectrum to be processed
+    :param beam_area: The beam area in radian^2
+    :return: The brightness temperature at each velocity step.
+    """
+    k = 1.3806503E-23  # boltzmann constant in J K^-1
+    jy_to_si = 1E-26  # J s^-1 m^-2 Hz^-1
+
+    factor = (wavelen**2 / (2*k)) * jy_to_si / (np.pi*beam_area/4)
+    print (factor)
+    return factor * spectrum.flux
 
 
 def plot_spectrum(x, y, filename, title, con_start_vel, con_end_vel):
@@ -319,7 +340,7 @@ def plot_emission_spectrum(velocity, em_mean, em_std, filename, title, con_start
     return
 
 
-def output_spectra(spectrum, opacity, filename, longitude, latitude, em_mean, em_std):
+def output_spectra(spectrum, opacity, filename, longitude, latitude, em_mean, em_std, temp_bright, beam_area):
     """
     Write the spectrum (velocity, flux and opacity) to a votable format file.
 
@@ -334,6 +355,7 @@ def output_spectra(spectrum, opacity, filename, longitude, latitude, em_mean, em
     table.add_column(Column(name='velocity', data=spectrum.velocity, unit='m/s'))
     table.add_column(Column(name='opacity', data=opacity))
     table.add_column(Column(name='flux', data=spectrum.flux, unit='Jy/beam'))
+    table.add_column(Column(name='temp_brightness', data=temp_bright, unit='K'))
     if len(em_mean) > 0:
         # The emission may not be available, so don't include it if not
         table.add_column(Column(name='em_mean', data=em_mean, unit='K'))
@@ -342,6 +364,7 @@ def output_spectra(spectrum, opacity, filename, longitude, latitude, em_mean, em
     votable = from_table(table)
     votable.infos.append(Info('longitude', 'longitude', longitude.value))
     votable.infos.append(Info('latitude', 'latitude', latitude.value))
+    votable.infos.append(Info('beam_area', 'beam_area', beam_area))
     writeto(votable, filename)
 
 
@@ -464,6 +487,7 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
                     name_prefix, mean, cont_sd))
                 all_cont_sd.append(cont_sd)
                 opacity = get_opacity(spectrum, mean)
+                temp_bright = get_temp_bright(spectrum, src_data[3])
                 # print opacity
                 dir_prefix = day_dir_name + "/"
                 img_name = name_prefix + "_plot.png"
@@ -483,7 +507,7 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
                                            src_data[0], field), min_con_vel,
                                        max_con_vel)
                 output_spectra(spectrum, opacity, filename, longitude, latitude,
-                               em_mean, em_std)
+                               em_mean, em_std, temp_bright, src_data[3])
                 all_opacity.append(opacity)
 
                 t = Template('<tr><td>${img}</td><td>l:&nbsp;${longitude}<br/>' +

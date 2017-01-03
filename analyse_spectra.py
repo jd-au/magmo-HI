@@ -85,7 +85,7 @@ def read_spectra():
     """
     spectra = []
 
-    vo_files = glob.glob('day*/*.votable.xml')
+    vo_files = glob.glob('day*/*_opacity.votable.xml')
     print("Reading {} spectrum files.".format(len(vo_files)))
     for filename in sorted(vo_files):
         # print ('Reading', filename)
