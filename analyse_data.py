@@ -59,7 +59,7 @@ def get_high_signal_fields(day_dir_name):
 
 def find_sources(day_dir_name, field_name):
     """
-    Search a contoinuum file for sources using the Aegean source finder. A
+    Search a continuum file for sources using the Aegean source finder. A
     VOTable file containing the list of discovered sources will be written out
     for the field. This function will use the Aegean source finder
     ( https://github.com/PaulHancock/Aegean ) to identify the sources.
@@ -75,7 +75,7 @@ def find_sources(day_dir_name, field_name):
         print ("##--## Searching continuum image " + cont_file + " ##--##")
         magmo.run_os_cmd('bane ' + cont_file)
         aegean_cmd = 'aegean ' + cont_file + ' --autoload --telescope=ATCA ' \
-                     '--cores=1 --table=' + table_file
+                     '--cores=1 --island --table=' + table_file
         magmo.run_os_cmd(aegean_cmd)
     except magmo.CommandFailedError as e:
         error_list.append(str(e))
@@ -354,7 +354,7 @@ def output_spectra(spectrum, opacity, filename, longitude, latitude, em_mean, em
     table.add_column(Column(name='plane', data=spectrum.plane))
     table.add_column(Column(name='velocity', data=spectrum.velocity, unit='m/s'))
     table.add_column(Column(name='opacity', data=opacity))
-    table.add_column(Column(name='flux', data=spectrum.flux, unit='Jy/beam'))
+    table.add_column(Column(name='flux', data=spectrum.flux, unit='Jy', description='Flux per beam'))
     table.add_column(Column(name='temp_brightness', data=temp_bright, unit='K'))
     if len(em_mean) > 0:
         # The emission may not be available, so don't include it if not
