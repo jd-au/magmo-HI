@@ -11,19 +11,22 @@
 
 from __future__ import print_function, division
 
-from astropy.io import fits
+from astropy.io import fits, votable
 from astropy.io.votable import parse, from_table, writeto
-from astropy.table import Table
+from astropy.table import Table, Column
 from scipy import ndimage
-import analyse_data
+
+import argparse
 import csv
 import datetime
 import glob
 import magmo
+import math
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy import ma
 import os
+import re
 import time
 
 
@@ -77,6 +80,22 @@ class Spectrum(object):
         return self.get_field_id() + ", src: " + str(self.src_id)
 
 
+def parseargs():
+    """
+    Parse the command line arguments
+    :return: An args map with the parsed arguments
+    """
+    parser = argparse.ArgumentParser(
+        description="Analyse the produced HI spectra and extract stats and produce diagrams.")
+    # parser.add_argument("-i", "--input", help="The input spectra catalogue",
+    #                    default='magmo-spectra.vot')
+    # parser.add_argument("--plot_only", help="Produce plots for the result of a previous decomposition", default=False,
+    #                    action='store_true')
+
+    args = parser.parse_args()
+    return args
+
+
 def read_spectra():
     """
     Read in the spectra produced in earlier pipeline stages.
@@ -88,7 +107,7 @@ def read_spectra():
     vo_files = glob.glob('day*/*_opacity.votable.xml')
     print("Reading {} spectrum files.".format(len(vo_files)))
     for filename in sorted(vo_files):
-        # print ('Reading', filename)
+        print ('Reading', filename)
         votable = parse(filename, pedantic=False)
         results = next(resource for resource in votable.resources if
                        resource.type == "results")
@@ -102,6 +121,8 @@ def read_spectra():
                         gal_long -= 360
                 if info.name == 'latitude':
                     gal_lat = float(info.value)
+                if info.name == 'beam_area':
+                    beam_area = float(info.value)
             if gal_long is None:
                 print("No longitude provided for %s, skipping" % filename)
                 continue
@@ -110,12 +131,15 @@ def read_spectra():
             velocities = np.zeros(len(results_array))
             opacities = np.zeros(len(results_array))
             fluxes = np.zeros(len(results_array))
+            em_temps = np.zeros(len(results_array))
             i = 0
             for row in results_array:
                 opacity = row['opacity']
                 velocities[i] = row['velocity'] / 1000.0
                 opacities[i] = opacity
                 fluxes[i] = row['flux']
+                if 'em_mean' in results_array.dtype.names:
+                    em_temps[i] = row['em_mean']
                 i += 1
             field = filename.split('_')
             parts = field[0].split('/')
@@ -136,6 +160,8 @@ def read_spectra():
             spectrum.max_s_max_n = max_s_max_n
             spectrum.continuum_sd = continuum_sd
             spectrum.rating = rating
+            spectrum.beam_area = beam_area
+            spectrum.em_temps = em_temps
             spectra.append(spectrum)
 
     return spectra
@@ -432,7 +458,27 @@ def calc_rating(opacity_range, max_s_max_n, continuum_sd):
     return rating_codes[rating]
 
 
-def output_spectra_catalogue(spectra):
+def is_resolved(day, field_name, island_id, source_id, beam_area, islands):
+    """
+    Identify if this spectrum is for a resolved source. A sourceis resolved if its area is larger than the beam area.
+
+    :param day: The day of the observation
+    :param field_name: The field observed
+    :param island_id: The id of the source island
+    :param source_id: The component id within the island
+    :param beam_area: The area of the beam in steradians
+    :param sources: The table of all sources
+    :return: True if the source is resolved, False otherwise.
+    """
+    for isle in islands:
+        print (isle['Day'], day, isle['Field'], field_name, isle['island'], island_id)
+        if isle['Day'] == day and isle['Field'] == field_name and isle['island'] == int(island_id):
+            #src_area = math.radians(src['a']/3600.0) * math.radians(src['b']/3600.0)
+            print ("island %s %s %s is %f as compared to beam of %f" % (day, field_name, island_id,  isle['area'], isle['beam_area']))
+            return isle['area'] > isle['beam_area']
+
+
+def output_spectra_catalogue(spectra, isle_day_map):
     """
     Output the list of spectrum stats to a VOTable file magmo-spectra.vot
 
@@ -456,6 +502,7 @@ def output_spectra_catalogue(spectra):
     max_s_max_n = np.zeros(rows)
     rating = np.empty(rows, dtype=object)
     used = np.empty(rows, dtype=bool)
+    resolved = np.empty(rows, dtype=bool)
     filenames = np.empty(rows, dtype=object)
     local_paths = np.empty(rows, dtype=object)
 
@@ -478,6 +525,9 @@ def output_spectra_catalogue(spectra):
         max_s_max_n[i] = spectrum.max_s_max_n
         continuum_sd[i] = spectrum.continuum_sd
         rating[i] = spectrum.rating
+        src_parts = spectrum.src_id.split('-')
+        resolved[i] = is_resolved(spectrum.day, spectrum.field_name, src_parts[0], src_parts[1], spectrum.beam_area,
+                                  isle_day_map[spectrum.day] if spectrum.day in isle_day_map else None)
 
         used[i] = not spectrum.low_sn
         filenames[i] = 'day' + spectrum.day + '/' + spectrum.field_name + \
@@ -488,12 +538,12 @@ def output_spectra_catalogue(spectra):
     spectra_table = Table(
         [days, fields, sources, longitudes, latitudes, max_flux, min_opacity,
          max_opacity, rms_opacity, min_velocity, max_velocity, used,
-         opacity_range, max_s_max_n, continuum_sd, rating,
+         opacity_range, max_s_max_n, continuum_sd, rating, resolved,
          filenames, local_paths],
         names=['Day', 'Field', 'Source', 'Longitude', 'Latitude', 'Max_Flux',
                'Min_Opacity', 'Max_Opacity', 'RMS_Opacity', 'Min_Velocity',
                'Max_Velocity', 'Used', 'Opacity_Range', 'Max_S_Max_N',
-               'Continuum_SD', 'Rating', 'Filename', 'Local_Path'],
+               'Continuum_SD', 'Rating', 'Resolved', 'Filename', 'Local_Path'],
         meta={'ID': 'magmo_spectra',
               'name': 'MAGMO Spectra ' + str(datetime.date.today())})
     votable = from_table(spectra_table)
@@ -552,15 +602,177 @@ def output_field_catalogue(fields, used_fields):
     print("Wrote out", i, "fields to", filename)
 
 
+def read_sources(filename, sources):
+    print ("Extracting sources from " + filename)
+
+    src_votable = votable.parse(filename, pedantic=False)
+
+    # Add day and field info
+    pattern = re.compile('day([0-9]+)/([0-9.+-]+)_src_[a-z]*.vot')
+    result = pattern.match(filename)
+    day = result.group(1)
+    field = result.group(2)
+    num_rows = len(src_votable.get_first_table().array)
+    day_data = np.repeat([day], num_rows)
+    field_data = np.repeat([field], num_rows)
+    src_table = src_votable.get_first_table().to_table()
+    src_table.add_column(Column(name='Day', data=day_data), index=0)
+    src_table.add_column(Column(name='Field', data=field_data), index=1)
+
+    if sources is None:
+        sources = src_table
+    else:
+        for row in src_table:
+            sources.add_row(row)
+
+    return sources
+
+
+def output_source_catalogue():
+    vo_files = glob.glob('day*/*_src_comp.vot')
+    sources = None
+    for vof in vo_files:
+        sources = read_sources(vof, sources)
+
+    # Write out the catalogue
+    sources.meta['name'] = 'MAGMO Sources ' + str(datetime.date.today())
+    vot = votable.from_table(sources)
+    vot.to_xml("magmo-sources.vot")
+
+    vo_files = glob.glob('day*/*_src_isle.vot')
+    islands = None
+    for vof in vo_files:
+        islands = read_sources(vof, islands)
+
+    # Write out the catalogue
+    islands.meta['name'] = 'MAGMO Islands ' + str(datetime.date.today())
+    vot = votable.from_table(islands)
+    vot.to_xml("magmo-islands.vot")
+
+    # Create a map by day of the islands
+    isle_day_map = {}
+    for isle in islands:
+        day = isle['Day']
+        if day not in isle_day_map:
+            isle_day_map[day] = []
+        day_list = isle_day_map[day]
+        day_list.append(isle)
+
+    return isle_day_map
+
+
+def output_single_phase_catalogue(spectra):
+    """
+    Create a catalogue of the spin temperature of each channel of each spectrum based on a naive single phase
+    assumption.
+    :param spectra: The list of all spectra
+    :return: None
+    """
+    spectra_by_long = sorted(spectra, key=lambda spectrum: spectrum.longitude)
+
+    longitudes = []
+    latitudes = []
+    velocities = []
+    emission_temps = []
+    opacities = []
+    spin_temperatures = []
+
+    for spectrum in spectra_by_long:
+        for i in range(len(spectrum.velocity)):
+            if spectrum.em_temps[i] > 0:
+                longitudes.append(spectrum.longitude)
+                latitudes.append(spectrum.latitude)
+                velocities.append(spectrum.velocity[i])
+                emission_bright_temp = spectrum.em_temps[i]
+                emission_temps.append(emission_bright_temp)
+                opacities.append(spectrum.opacities[i])
+                spin_t = None
+                if emission_bright_temp:
+                    spin_t = emission_bright_temp / spectrum.opacities[i]
+                spin_temperatures.append(spin_t)
+
+    temp_table = Table(
+        [longitudes, latitudes, velocities, spin_temperatures, emission_temps, opacities],
+        names=['Longitude', 'Latitude', 'Velocity', 'Spin_Temp', 'Emission_Bright_Temp', 'Opacity'],
+        meta={'ID': 'magmo_single_phase_spin_temp',
+              'name': 'MAGMO 1P Spin Temp ' + str(datetime.date.today())})
+    votable = from_table(temp_table)
+    filename = "magmo-1p-temp.vot"
+    writeto(votable, filename)
+
+    print("Wrote out", len(spin_temperatures), "channel temperatures to", filename)
+
+
+def plot_spectra(spectra):
+    magmo.ensure_dir_exists("plots")
+    for rating in 'ABCDEF':
+        magmo.ensure_dir_exists("plots/" + rating)
+
+    for spectrum in spectra:
+        if spectrum.em_temps is None:
+            # skip entries which have no emission data
+            continue
+
+        # Plot line chart of bright_temp vs opacity according in velocity order
+        fig = plt.figure(0, [6, 9])
+        #plt.title("Foo")
+        #fig.set_title(spectrum.field_name)
+
+        # 1. emission
+        ax = fig.add_subplot(3, 1, 1)
+        ax.plot(spectrum.velocity, spectrum.em_temps)
+        #ax.axhline(0, color='r')
+        #ax.set_xlabel(r'Velocity relative to LSR (km/s)')
+        ax.set_ylabel(r'$T_B (K)$')
+        ax.grid(True)
+        ax.set_title(spectrum.field_name + " src " + spectrum.src_id + " on day " + spectrum.day + "(" + spectrum.rating + ")")
+        plt.setp(ax.get_xticklabels(), visible=False)
+
+        # 2. absorption
+        ax2 = fig.add_subplot(3, 1, 2, sharex=ax)
+        ax2.plot(spectrum.velocity, spectrum.opacities)
+        #ax2.axhline(1, color='r')
+        ax2.set_xlabel(r'Velocity relative to LSR (km/s)')
+        ax2.set_ylabel(r'$e^{(-\tau)}$')
+        ax2.grid(True)
+
+        # 3. scatter
+        ax3 = fig.add_subplot(3, 1, 3)
+        ax3.plot(1-spectrum.opacities, spectrum.em_temps, markersize=2, marker='o')
+        ax3.set_xlabel(r'$1 - e^{(-\tau)}$')
+        ax3.set_ylabel(r'$T_B (K)$')
+        ax3.grid(True)
+
+        plt.tight_layout()
+        # change axis location of ax5
+        #pos1 = ax.get_position()
+        #pos2 = ax2.get_position()
+        #points1 = pos1.get_points()
+        #points2 = pos2.get_points()
+        #points2[1][1] = points1[0][1]
+        #pos2.set_points(points2)
+        #ax2.set_position(pos2)
+
+        # Write out to plots/field-day-src.pdf
+        filename = spectrum.field_name + "_" + spectrum.day + "_src" + spectrum.src_id + ".pdf"
+        plt.savefig("plots/" + spectrum.rating + "/" + filename)
+        plt.close()
+
+
 def main():
     """
     Main script for analyse_spectra
     :return: The exit code
     """
+    args = parseargs()
+
     start = time.time()
 
     print("#### Started analysis of MAGMO spectra at %s ####" %
           time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start)))
+
+    # Output source catalogue
+    isle_day_map = output_source_catalogue()
 
     # Process Spectra
     spectra = read_spectra()
@@ -569,7 +781,12 @@ def main():
     plot_lv(x, y, c, 'magmo-lv.pdf', continuum_ranges, False)
     plot_lv(x, y, c, 'magmo-lv-zoom.pdf', continuum_ranges, True)
     plot_lv_image(x, y, c, 'magmo-lv-zoom-im.pdf')
-    output_spectra_catalogue(spectra)
+    output_spectra_catalogue(spectra, isle_day_map)
+
+    # calculate single phase spin temp for A-C
+    output_single_phase_catalogue(spectra)
+
+    plot_spectra(spectra)
 
     # Output only the really good spectra
     x, y, c, temp = extract_lv(spectra, min_rating='B')
