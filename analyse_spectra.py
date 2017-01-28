@@ -132,6 +132,7 @@ def read_spectra():
             opacities = np.zeros(len(results_array))
             fluxes = np.zeros(len(results_array))
             em_temps = np.zeros(len(results_array))
+            em_std = np.zeros(len(results_array))
             i = 0
             for row in results_array:
                 opacity = row['opacity']
@@ -140,6 +141,8 @@ def read_spectra():
                 fluxes[i] = row['flux']
                 if 'em_mean' in results_array.dtype.names:
                     em_temps[i] = row['em_mean']
+                if 'em_std' in results_array.dtype.names:
+                    em_std[i] = row['em_std']
                 i += 1
             field = filename.split('_')
             parts = field[0].split('/')
@@ -162,6 +165,7 @@ def read_spectra():
             spectrum.rating = rating
             spectrum.beam_area = beam_area
             spectrum.em_temps = em_temps
+            spectrum.em_std = em_std
             spectra.append(spectrum)
 
     return spectra
@@ -709,7 +713,7 @@ def plot_spectra(spectra):
         magmo.ensure_dir_exists("plots/" + rating)
 
     for spectrum in spectra:
-        if spectrum.em_temps is None:
+        if spectrum.em_temps is None or len(spectrum.em_temps) == 0:
             # skip entries which have no emission data
             continue
 
@@ -721,6 +725,10 @@ def plot_spectra(spectra):
         # 1. emission
         ax = fig.add_subplot(3, 1, 1)
         ax.plot(spectrum.velocity, spectrum.em_temps)
+        em_max = spectrum.em_temps + spectrum.em_std
+        em_min = spectrum.em_temps - spectrum.em_std
+        plt.fill_between(spectrum.velocity, em_min, em_max, facecolor='lightgray', color='lightgray')
+
         #ax.axhline(0, color='r')
         #ax.set_xlabel(r'Velocity relative to LSR (km/s)')
         ax.set_ylabel(r'$T_B (K)$')
