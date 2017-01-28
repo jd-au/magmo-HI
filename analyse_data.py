@@ -103,12 +103,28 @@ def read_sources(filename):
         print ("Found source %s at %.4f, %.4f with flux %.4f and rms of %.4f "
                "giving S/N of %.4f" % (id, ra, dec, flux, rms, sn))
         if sn > 10 and flux > 0.02:
-            sources.append([ra, dec, id, flux])
+            sources.append([ra, dec, id, flux, row['island']])
         else:
             print ("Ignoring source at %.4f, %.4f due to low S/N of %.4f or "
                    "flux of %.4f" % (ra, dec, sn, flux))
 
     return sources
+
+
+def read_islands(filename):
+    print ("Extracting islands from " + filename)
+    islands = {}
+
+    if not os.path.exists(filename):
+        print ("Warning: File %s does not exist, skipping island read." % \
+               filename)
+        return {}
+
+    isle_votable = votable.parse(filename, pedantic=False)
+    results = isle_votable.get_first_table().array
+    for row in results:
+        islands[row['island']] = row
+    return islands
 
 
 def read_continuum_ranges():
@@ -154,6 +170,7 @@ def extract_spectra(daydirname, field):
     fits_filename = "{0}/1420/magmo-{1}_1420_sl_restor.fits".format(daydirname,
                                                                     field)
     src_filename = "{0}/{1}_src_comp.vot".format(daydirname, field)
+    isle_filename = "{0}/{1}_src_isle.vot".format(daydirname, field)
 
     spectra = dict()
     source_ids = dict()
@@ -163,6 +180,7 @@ def extract_spectra(daydirname, field):
         return spectra, source_ids
 
     sources = read_sources(src_filename)
+    islands = read_islands(isle_filename)
     hdulist = fits.open(fits_filename)
     image = hdulist[0].data
     header = hdulist[0].header
@@ -180,20 +198,29 @@ def extract_spectra(daydirname, field):
         print ("Translated %.4f, %.4f to %d, %d" % (
             src[0], src[1], x_coord, y_coord))
 
-        slice = image[0, :, y_coord, x_coord]
-        l_edge, r_edge = find_edges(slice, num_edge_chan)
+        img_slice = image[0, :, y_coord, x_coord]
+        l_edge, r_edge = find_edges(img_slice, num_edge_chan)
         print("Using data range %d - %d out of %d channels." % (
-            l_edge, r_edge, len(slice)))
+            l_edge, r_edge, len(img_slice)))
 
         # plotSpectrum(np.arange(slice.size), slice)
         spectrum_array = rec.fromarrays(
-            [np.arange(slice.size)[l_edge:r_edge],
+            [np.arange(img_slice.size)[l_edge:r_edge],
              velocities[l_edge:r_edge],
-             slice[l_edge:r_edge]],
+             img_slice[l_edge:r_edge]],
             names='plane,velocity,flux')
         c = SkyCoord(src[0], src[1], frame='icrs', unit="deg")
         spectra[c.galactic.l] = spectrum_array
-        source_ids[c.galactic.l] = [src[2], src[3], c, beam_area]
+
+        isle = islands.get(src[4], None)
+        src_map = {'id': src[2], 'flux': src[3], 'pos': c, 'beam_area': beam_area}
+        if isle:
+            src_map['a'] = isle['a']
+            src_map['b'] = isle['b']
+            src_map['pa'] = isle['pa']
+        # [ra, dec, id, flux])
+        print (src_map)
+        source_ids[c.galactic.l] = src_map
     del image
     del header
     hdulist.close()
@@ -466,7 +493,7 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
             for longitude in sorted(spectra.keys()):
                 spectrum = spectra.get(longitude)
                 src_data = source_ids.get(longitude)
-                name_prefix = field + '_src' + src_data[0]
+                name_prefix = field + '_src' + src_data['id']
                 idx += 1
                 mean, cont_sd, min_con_vel, max_con_vel = get_mean_continuum(
                     spectrum,
@@ -487,27 +514,27 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
                     name_prefix, mean, cont_sd))
                 all_cont_sd.append(cont_sd)
                 opacity = get_opacity(spectrum, mean)
-                temp_bright = get_temp_bright(spectrum, src_data[3])
+                temp_bright = get_temp_bright(spectrum, src_data['beam_area'])
                 # print opacity
                 dir_prefix = day_dir_name + "/"
                 img_name = name_prefix + "_plot.png"
                 plot_spectrum(spectrum.velocity, opacity, dir_prefix + img_name,
                               "Spectra for source {0} in field {1}".format(
-                                  src_data[0], field), min_con_vel, max_con_vel)
+                                  src_data['id'], field), min_con_vel, max_con_vel)
                 filename = dir_prefix + name_prefix + '_opacity.votable.xml'
                 latitude = src_data[2].galactic.b
 
-                em_mean, em_std = get_emission_spectra(src_data[2],
+                em_mean, em_std = get_emission_spectra(src_data['pos'],
                                                        spectrum.velocity,
                                                        file_list, dir_prefix + name_prefix)
                 em_img_name = name_prefix + "_emission.png"
                 plot_emission_spectrum(spectrum.velocity, em_mean, em_std,
                                        dir_prefix + name_prefix + "_emission.png",
                                        "Emission around source {0} in field {1}".format(
-                                           src_data[0], field), min_con_vel,
+                                           src_data['id'], field), min_con_vel,
                                        max_con_vel)
                 output_spectra(spectrum, opacity, filename, longitude, latitude,
-                               em_mean, em_std, temp_bright, src_data[3])
+                               em_mean, em_std, temp_bright, src_data['beam_area'])
                 all_opacity.append(opacity)
 
                 t = Template('<tr><td>${img}</td><td>l:&nbsp;${longitude}<br/>' +
@@ -515,7 +542,7 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
                              'Cont&nbsp;SD:&nbsp;${cont_sd}</td><td><a href="${img}">' +
                              '<img src="${img}" width="500px"></a></td><td><a href="${em_img}">' +
                              '<img src="${em_img}" width="500px"></a></td></tr>\n')
-                spectra_idx.write(t.substitute(img=img_name, em_img=em_img_name, peak_flux=src_data[1],
+                spectra_idx.write(t.substitute(img=img_name, em_img=em_img_name, peak_flux=src_data['flux'],
                                                longitude=longitude, mean=mean, cont_sd=cont_sd))
 
 
