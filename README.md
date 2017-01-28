@@ -38,7 +38,7 @@ observations will be largely of HMSF regions.
 - readme.md
 - magmo-obs.csv (table of days and date prefixes plus any other needed metadata)
 - load_day.py
-- process-day.py
+- process_data.py
 - analyse-day.py
 - clean-day.py
 - analyse-spectra.py
@@ -52,22 +52,25 @@ observations will be largely of HMSF regions.
 
 - prep-days.py
     - Prepares an extended list of days with the patterns to match the RPFITS files.
-- load-data.py day
+- load_data.py day
     - Uses atlod to extract the HI spectral data and the 2GHz continuum data
     - Split out the uv data into sources (uvsplit)
     - Backup the flag, header and history files for each source
-- process-data.py day
+- process_day.py day
     - Flag, calibrate, produce 2 GHz continuum image, produce HI image cube
-- analyse-data.py day
+- analyse_data.py day
     - Source find on continuum images
     - For each point of interest extract spectra, convert to opacity and output numerical spectrum
-- clean-data.py day
-    - Remove all produced images and cubes, reset header, history and flags back to backed up files.
-- analyse-spectra.py
+- analyse_spectra.py
     - Read in all numerical spectra and produce reports
     - Longitude-velocity diagram
     - Histograms
     - Catalogue of HI regions
+- decompose.py
+    - Decompose each of the MAGMO spectra into Gaussian components.
 - magmo.py
     - Utility functions for processing magmo HI data
-    
+- clean_analysis.py day
+    - Remove all analysis output files for a day.
+- clean-data.py day
+    - Remove all produced images and cubes, reset header, history and flags back to backed up files.
