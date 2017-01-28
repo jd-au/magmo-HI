@@ -5,7 +5,7 @@ import aplpy
 import magmo
 import math
 import os
-import process_data
+import process_day
 import sys
 import time
 
@@ -14,7 +14,7 @@ from string import Template
 # Read day parameter
 if len(sys.argv) != 2:
     print("Incorrect number of parameters.")
-    print("Usage: python process_data.py day")
+    print("Usage: python process_day.py day")
     exit(1)
 day = sys.argv[1]
 
@@ -32,7 +32,7 @@ line_band = {'main': '1420', 'freqs': ['1420', '1421', '1420.5'], 'line': True}
 
 error_list = []
 
-error_list.extend(process_data.build_images(dayDirName, sources, line_band, day))
+error_list.extend(process_day.build_images(dayDirName, sources, line_band, day))
 
 img_idx = open(dayDirName + '/images-comp.html', 'w')
 t = Template('<html>\n<head><title>Day $day image previews</title></head>\n'
@@ -47,14 +47,14 @@ for src in sources:
     restored_img = "1757/magmo-" + src_name + "_1757_restor"
     sn = 0.0
     if os.path.exists(restored_img):
-        rms, max = process_data.get_signal_noise_ratio(restored_img)
+        rms, max = process_day.get_signal_noise_ratio(restored_img)
         if rms > 0:
             sn = max / rms
         sn /= math.sqrt(1053)
     max_1420 = max
     restored_img = "1420/magmo-" + src_name + "_1420_restor"
     if os.path.exists(restored_img):
-        rms_1420, max_1420 = process_data.get_signal_noise_ratio(restored_img)
+        rms_1420, max_1420 = process_day.get_signal_noise_ratio(restored_img)
 
     beam_file = "1757/magmo-" + src_name + "_1757_beam"
     beam_img = beam_file + ".png"
