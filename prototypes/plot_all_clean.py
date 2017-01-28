@@ -15,13 +15,13 @@ trial_path = '/Users/jamesdempsey/Documents/RSAA/magmo/prev_runs/20161023'
 
 
 def plot_source(source, filename):
-    suffixes = ['baseclean', '2000pos', 'ni1000', 'ni500', 'negstop',
-                'cutoff3-250', 'cutoff3-250-pos', 'ni250', 'sdi250']
-    titles = ['2000 Iterations', '2000 Iterations, Positive', '1000 Iterations',
+    suffixes = ['baseclean', '2000pos', 'ni500', 'negstop',
+                'cutoff3-250', 'cutoff3-250-pos', 'ni250', 'sdi250', 'sdi500']
+    titles = ['2000 Iterations', '2000 Iterations, Positive',
               '500 Iterations', '2000 Iterations, Negstop',
               '250 Iterations, 3*RMS Cutoff',
               '250 Iterations, 3*RMS Cutoff, Positive', '250 Iterations',
-              'SDI, 250 Iterations']
+              'SDI, 250 Iterations', 'SDI, 500 Iterations']
 
     fig_size = plt.rcParams["figure.figsize"]
     print (fig_size)
