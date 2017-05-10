@@ -157,7 +157,7 @@ def read_spectra():
             opacity_range = max_opacity - min_opacity
             max_s_max_n = (1 - min_opacity) / (max_opacity - 1)
             continuum_sd = calc_continuum_sd(spectrum, continuum_ranges)
-            rating = calc_rating(opacity_range, max_s_max_n, continuum_sd)
+            rating = calc_rating(opacity_range, max_s_max_n, continuum_sd, em_std)
 
             spectrum.opacity_range = opacity_range
             spectrum.max_s_max_n = max_s_max_n
@@ -210,20 +210,26 @@ def read_field_stats():
     return fields
 
 
-def extract_lv(spectra, min_rating='C'):
+def extract_lv(spectra, field_map, min_rating='C'):
     x = []
     y = []
     c = []
     bad_spectra = 0
+    duplicate_spectra = 0
     prev_field = ''
     num_fields = 0
     used_fields = []
 
     for spectrum in spectra:
         opacities = spectrum.opacities
+        spectrum.duplicate = False
         if spectrum.rating > min_rating:
             bad_spectra += 1
             spectrum.low_sn = True
+            continue
+        if field_map[spectrum.get_field_id()].duplicate:
+            duplicate_spectra += 1
+            spectrum.duplicate = True
             continue
         #if np.max(opacities) > max_opacity or np.min(opacities) < min_opacity:
         #    bad_spectra += 1
@@ -238,8 +244,8 @@ def extract_lv(spectra, min_rating='C'):
             used_fields.append(field_id)
             num_fields += 1
 
-    print("In %d fields read %d spectra of which %d had reasonable S/N. " % (
-        num_fields, len(spectra), len(spectra) - bad_spectra))
+    print("In %d fields read %d spectra of which %d had reasonable S/N and %d were duplicates " % (
+        num_fields, len(spectra), len(spectra) - bad_spectra, duplicate_spectra))
 
     return x, y, c, used_fields
 
@@ -448,7 +454,7 @@ def calc_continuum_sd(spectrum, continuum_ranges):
     return sd_cont
 
 
-def calc_rating(opacity_range, max_s_max_n, continuum_sd):
+def calc_rating(opacity_range, max_s_max_n, continuum_sd, em_std):
     rating_codes = 'ABCDEF'
     rating = 0
 
@@ -504,11 +510,14 @@ def output_spectra_catalogue(spectra, isle_day_map):
     opacity_range = np.zeros(rows)
     continuum_sd = np.zeros(rows)
     max_s_max_n = np.zeros(rows)
+    max_em_std = np.zeros(rows)
     rating = np.empty(rows, dtype=object)
     used = np.empty(rows, dtype=bool)
     resolved = np.empty(rows, dtype=bool)
+    duplicate = np.empty(rows, dtype=bool)
     filenames = np.empty(rows, dtype=object)
     local_paths = np.empty(rows, dtype=object)
+    local_emission_paths = np.empty(rows, dtype=object)
 
     base_path = os.path.realpath('.')
     i = 0
@@ -524,6 +533,7 @@ def output_spectra_catalogue(spectra, isle_day_map):
         rms_opacity[i] = np.sqrt(np.mean(np.square(spectrum.opacities)))
         min_velocity[i] = np.min(spectrum.velocity)
         max_velocity[i] = np.max(spectrum.velocity)
+        max_em_std[i] = np.max(spectrum.em_std)
 
         opacity_range[i] = spectrum.opacity_range
         max_s_max_n[i] = spectrum.max_s_max_n
@@ -533,21 +543,26 @@ def output_spectra_catalogue(spectra, isle_day_map):
         resolved[i] = is_resolved(spectrum.day, spectrum.field_name, src_parts[0], src_parts[1], spectrum.beam_area,
                                   isle_day_map[spectrum.day] if spectrum.day in isle_day_map else None)
 
+        duplicate[i] = spectrum.duplicate
         used[i] = not spectrum.low_sn
-        filenames[i] = 'day' + spectrum.day + '/' + spectrum.field_name + \
-                       "_src" + spectrum.src_id + "_plot.png"
+        prefix = 'day' + spectrum.day + '/' + spectrum.field_name + \
+                       "_src" + spectrum.src_id
+        filenames[i] =  prefix + "_plot.png"
+        em_filename = prefix + "_emission.png"
         local_paths[i] = base_path + '/' + filenames[i]
+        local_emission_paths[i] = base_path + '/' + em_filename
         i += 1
 
     spectra_table = Table(
         [days, fields, sources, longitudes, latitudes, max_flux, min_opacity,
          max_opacity, rms_opacity, min_velocity, max_velocity, used,
-         opacity_range, max_s_max_n, continuum_sd, rating, resolved,
-         filenames, local_paths],
+         opacity_range, max_s_max_n, continuum_sd, max_em_std, rating, resolved, duplicate,
+         filenames, local_paths, local_emission_paths],
         names=['Day', 'Field', 'Source', 'Longitude', 'Latitude', 'Max_Flux',
                'Min_Opacity', 'Max_Opacity', 'RMS_Opacity', 'Min_Velocity',
                'Max_Velocity', 'Used', 'Opacity_Range', 'Max_S_Max_N',
-               'Continuum_SD', 'Rating', 'Resolved', 'Filename', 'Local_Path'],
+               'Continuum_SD', 'max_em_std', 'Rating', 'Resolved', 'Duplicate',
+               'Filename', 'Local_Path', 'Local_Emission_Path'],
         meta={'ID': 'magmo_spectra',
               'name': 'MAGMO Spectra ' + str(datetime.date.today())})
     votable = from_table(spectra_table)
@@ -558,6 +573,36 @@ def output_spectra_catalogue(spectra, isle_day_map):
         num_rating = len(np.where(rating == grade)[0])
         print ("%s: %3d" % (grade, num_rating))
     print ("Mean continuum sd %f" % np.mean(continuum_sd))
+
+
+def flag_duplicate_fields(fields):
+    """
+    Examine the list of fields and identify those fields that are duplicate observations and should not be used. Where
+    a field was observed more than once, the observation with the highest signal to noise ratio will be the only one
+    used. A new duplicate value will be added to each field, with a value of true for those which should not be used.
+
+    :param fields: The list of fields
+    :return: The map of fields against their day and name.
+    """
+    unique_field_map = dict()
+    full_field_map = dict()
+    for field in fields:
+        full_field_map[field.get_field_id()] = field
+        if field.name in unique_field_map:
+            prev_field = unique_field_map.get(field.name)
+            if field.sn_ratio > prev_field.sn_ratio:
+                prev_field.duplicate = True
+                print("Marking day %s field %s as duplicate (sn %.03f < %.03f for day %s)" % (
+                    prev_field.day, prev_field.name, float(prev_field.sn_ratio), float(field.sn_ratio), field.day))
+            else:
+                field.duplicate = True
+                print("Marking day %s field %s as duplicate (sn %.03f < %.03f for day %s)" % (
+                    field.day, field.name, float(field.sn_ratio), float(prev_field.sn_ratio), prev_field.day))
+                continue
+        field.duplicate = False
+        unique_field_map[field.name] = field
+    print("Marked %d fields as duplicates out of %d" % (len(fields) - len(unique_field_map), len(fields)))
+    return full_field_map
 
 
 def output_field_catalogue(fields, used_fields):
@@ -578,6 +623,7 @@ def output_field_catalogue(fields, used_fields):
     sn_ratios = np.zeros(rows)
     strong = np.empty(rows, dtype=bool)
     used = np.empty(rows, dtype=bool)
+    duplicate = np.empty(rows, dtype=bool)
 
     i = 0
     for field in fields:
@@ -590,13 +636,14 @@ def output_field_catalogue(fields, used_fields):
         sn_ratios[i] = field.sn_ratio
         strong[i] = True if field.used == 'Y' else False
         used[i] = field.get_field_id() in used_fields
+        duplicate[i] = field.duplicate
         i += 1
 
     fields_table = Table(
         [days, field_names, longitudes, latitudes, max_fluxes, sn_ratios,
-         strong, used],
+         strong, used, duplicate],
         names=['Day', 'Field', 'Longitude',
-               'Latitude', 'Max_Flux', 'SN_Ratio', 'Strong', 'Used'],
+               'Latitude', 'Max_Flux', 'SN_Ratio', 'Strong', 'Used', 'Duplicate'],
         meta={'ID': 'magmo_fields',
               'name': 'MAGMO Fields ' + str(datetime.date.today())})
     votable = from_table(fields_table)
@@ -719,8 +766,6 @@ def plot_spectra(spectra):
 
         # Plot line chart of bright_temp vs opacity according in velocity order
         fig = plt.figure(0, [6, 9])
-        #plt.title("Foo")
-        #fig.set_title(spectrum.field_name)
 
         # 1. emission
         ax = fig.add_subplot(3, 1, 1)
@@ -779,12 +824,16 @@ def main():
     print("#### Started analysis of MAGMO spectra at %s ####" %
           time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start)))
 
+    # Read Fields
+    fields = read_field_stats()
+    field_map = flag_duplicate_fields(fields)
+
     # Output source catalogue
     isle_day_map = output_source_catalogue()
 
     # Process Spectra
     spectra = read_spectra()
-    x, y, c, used_fields = extract_lv(spectra)
+    x, y, c, used_fields = extract_lv(spectra, field_map)
     continuum_ranges = magmo.get_continuum_ranges()
     plot_lv(x, y, c, 'magmo-lv.pdf', continuum_ranges, False)
     plot_lv(x, y, c, 'magmo-lv-zoom.pdf', continuum_ranges, True)
@@ -797,12 +846,11 @@ def main():
     plot_spectra(spectra)
 
     # Output only the really good spectra
-    x, y, c, temp = extract_lv(spectra, min_rating='B')
+    x, y, c, temp = extract_lv(spectra, field_map, min_rating='B')
     plot_lv(x, y, c, 'magmo-lv_AB.pdf', continuum_ranges, False)
     plot_lv_image(x, y, c, 'magmo-lv-zoom-im_AB.pdf')
 
     # Process Fields
-    fields = read_field_stats()
     output_field_catalogue(fields, used_fields)
 
     # also want

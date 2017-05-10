@@ -42,12 +42,14 @@ def parseargs():
                         type=int, default=-180)
     parser.add_argument("--long_max", help="The largest longitude to be decomposed",
                         type=int, default=180)
+    parser.add_argument("-q", "--quality", help="The minimum quality level to include",
+                        default='C')
     parser.add_argument("-o", "--output", help="The file name of the decomposition result.",
                         default='magmo-decomp.pickle')
     parser.add_argument("--plot_only", help="Produce plots for the result of a previous decomposition", default=False,
                         action='store_true')
     parser.add_argument("--train", help="Train GaussPy using the selected spectra. The produced alpha value can then " +
-                                        "be used for later decompostion.", default=False, action='store_true')
+                                        "be used for later decomposition.", default=False, action='store_true')
     parser.add_argument("--alpha1", help="The value for the first GaussPy smoothing parameter",
                         type=float, default=1.12)
     parser.add_argument("--alpha2", help="The value for the second GaussPy smoothing parameter",
@@ -75,10 +77,11 @@ def read_opacity(filename):
     return results_array
 
 
-def filter_spectra(spectra, min_long, max_long):
+def filter_spectra(spectra, min_long, max_long, min_quality):
     filtered = spectra[spectra['Longitude'] >= min_long]
     filtered = filtered[filtered['Longitude'] <= max_long]
-    filtered = filtered[filtered['Rating'] <= 'C']
+    filtered = filtered[filtered['Rating'] <= min_quality]
+    filtered = filtered[filtered['Duplicate'] == False]
     return filtered
 
 
@@ -118,9 +121,9 @@ def prepare_spectra(spectra):
         filename = get_opacity_filename(spectrum['Day'], spectrum['Field'], spectrum['Source'])
         #print("Reading", filename)
         opacity = read_opacity(filename)
-        if spectrum['Day'] == 43 and spectrum['Rating'] == 'A' and spectrum['Field'] == '019.612-0.120': # and spectrum['Source'] == '25-0':
-            print("Skipping ", spectrum['Rating'], spectrum['Day'], spectrum['Longitude'], spectrum['Field'], spectrum['Source'])
-            continue
+        #if spectrum['Day'] == 43 and spectrum['Rating'] == 'A' and spectrum['Field'] == '019.612-0.120': # and spectrum['Source'] == '25-0':
+        #    print("Skipping ", spectrum['Rating'], spectrum['Day'], spectrum['Longitude'], spectrum['Field'], spectrum['Source'])
+        #    continue
 
         longitude = spectrum['Longitude']
         if longitude < 0:
@@ -198,7 +201,14 @@ def output_component_catalogue(spectra, data, data_decomposed):
     num_no_comps = {}
 
     for i in range(len(data_decomposed['fwhms_fit'])):
-        spectrum = spectra[data['spectrum_idx'][i]]
+        if i >= len(data['spectrum_idx']):
+            print("Error: data index of %d is invalid for data array of len %d" % (
+                i, len(data['spectrum_idx'])))
+        spectrum_idx = data['spectrum_idx'][i]
+        if spectrum_idx >= len(spectra):
+            print("Error: spectra index of %d at row %d is invalid for spectra array of len %d" % (
+                spectrum_idx, i, len(spectra)))
+        spectrum = spectra[spectrum_idx]
         fit_fwhms = data_decomposed['fwhms_fit'][i]
         fit_means = data_decomposed['means_fit'][i]
         fit_amps = data_decomposed['amplitudes_fit'][i]
@@ -271,6 +281,7 @@ def plot_spectrum(velo, opacity, fit_amps, fit_fwhms, fit_means, name, filename)
 
     y = convert_from_ratio(opacity)
     residual = plot_single_spectrum(ax, velo, y, fit_amps, fit_fwhms, fit_means, name)
+    residual_rms = np.sqrt(np.mean(np.square(residual)))
     ax.set_ylabel('$1 - e^{-\\tau}$')
 
     # Residual plot
@@ -278,7 +289,7 @@ def plot_spectrum(velo, opacity, fit_amps, fit_fwhms, fit_means, name, filename)
     ax.plot(velo, residual, 'or', markerfacecolor='None', markersize=2, markeredgecolor='blue')
     ax.grid()
 
-    plt.xlabel('LSR Velocity (km/s)')
+    plt.xlabel('LSR Velocity (km/s) n=%d rms=%.4f' % (len(fit_amps), residual_rms))
 
     plt.savefig(filename)
     plt.close()
@@ -333,7 +344,7 @@ def get_samples(data, rating_count=[4, 1, 1], ratings='ABC'):
     return indexes
 
 
-def output_decomposition(spectra, out_filename):
+def output_decomposition(spectra, out_filename, folder, data_filename):
     # For each spectra:
     # Output plots
     # Output component catalogue
@@ -400,13 +411,14 @@ def main():
 
     # Read in spectra
     spectra = read_spectra(args.input)
-    spectra = filter_spectra(spectra, args.long_min, args.long_max)
+    spectra = filter_spectra(spectra, args.long_min, args.long_max, args.quality)
 
-    # Decompose all spectra
-    if not args.plot_only:
+
+        # Decompose all spectra
+        if not args.plot_only:
         decompose(spectra, args.output, args.alpha1, args.alpha2, args.snr_thresh)
 
-    # Read in result
+        # Read in result
     output_decomposition(spectra, args.output)
 
     # Report
