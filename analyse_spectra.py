@@ -11,6 +11,7 @@
 
 from __future__ import print_function, division
 
+from astropy.coordinates import SkyCoord
 from astropy.io import fits, votable
 from astropy.io.votable import parse, from_table, writeto
 from astropy.table import Table, Column
@@ -639,11 +640,13 @@ def output_field_catalogue(fields, used_fields):
         duplicate[i] = field.duplicate
         i += 1
 
+    coords = SkyCoord(longitudes, latitudes, frame='galactic', unit="deg")
+
     fields_table = Table(
         [days, field_names, longitudes, latitudes, max_fluxes, sn_ratios,
-         strong, used, duplicate],
+         strong, used, duplicate, coords.icrs.ra.degree, coords.icrs.dec.degree],
         names=['Day', 'Field', 'Longitude',
-               'Latitude', 'Max_Flux', 'SN_Ratio', 'Strong', 'Used', 'Duplicate'],
+               'Latitude', 'Max_Flux', 'SN_Ratio', 'Strong', 'Used', 'Duplicate', 'ra', 'dec'],
         meta={'ID': 'magmo_fields',
               'name': 'MAGMO Fields ' + str(datetime.date.today())})
     votable = from_table(fields_table)
