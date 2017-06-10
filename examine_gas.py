@@ -19,6 +19,7 @@ import argparse
 import datetime
 import numpy as np
 import os
+import re
 import time
 
 
@@ -70,6 +71,29 @@ def read_emission(filename):
     return read_votable_results(filename)
 
 
+def get_field_key(name):
+    key = name.strip()
+    if re.search('^[0-9]\.', key):
+        key = '00' + key
+    elif re.search('^[0-9][0-9]\.', key):
+        key = '0' + key
+    return key
+
+
+def read_mmb_cat(filename):
+    """
+    Read in the catalogue for the 6 GHz Methanol Multibeam Maser catalogue (2010MNRAS.404.1029C)
+    :param filename: The filename of the votable catalogue.
+    :return: A map of catalogue rows indexed by their field name keys
+    """
+    mmb_cat = read_votable_results(filename)
+    maser_map = {}
+    for row in mmb_cat:
+        key = get_field_key(row['Name'])
+        maser_map[key] = row
+    return maser_map
+
+
 def get_emission_filename(day, field, source):
     t = Template('day${day}/${field}_src${source}_emission.votable.xml')
     return t.substitute(day=day, field=field, source=source)
@@ -85,7 +109,7 @@ def get_temp(emission, comp_vel):
     return 0, 0
 
 
-def analyse_components(components, spectra_map):
+def analyse_components(components, spectra_map, mmb_map):
     all_gas = []
     for component in components:
         # Load emission data
@@ -115,8 +139,17 @@ def analyse_components(components, spectra_map):
             gas.rating = spectrum['Rating']
 
             loc = SkyCoord(gas.longitude, gas.latitude, frame='galactic', unit="deg")
+            gas.loc = loc
             gas.ra = loc.icrs.ra.degree
             gas.dec = loc.icrs.dec.degree
+
+            maser = mmb_map.get(component['Field'])
+            if maser is None:
+                print ("unable to find maser for " + component['Field'])
+            else:
+                gas.maser_vel_low = maser['VL']
+                gas.maser_vel_high = maser['VH']
+                gas.maser_loc = SkyCoord(maser['RAJ2000'], maser['DEJ2000'], frame='fk5', unit="deg")
 
             all_gas.append(gas)
 
@@ -130,6 +163,14 @@ def analyse_components(components, spectra_map):
                 #component['t_s '] = t_s
                 print ("src %s at velocity %.4f has t_s %.3f (%.3f/%.3f)" % (component['Field'], comp_vel, t_s, t_off, comp_amp))
     return all_gas
+
+
+def is_gas_near_maser(gas):
+    if not hasattr(gas, 'maser_loc'):
+        return False
+    if gas.loc.separation(gas.maser_loc).value > (2/60):
+        return False
+    return gas.maser_vel_low <= gas.comp_vel <= gas.maser_vel_high
 
 
 def output_gas_catalogue(all_gas):
@@ -148,6 +189,7 @@ def output_gas_catalogue(all_gas):
     temps_off = ma.array(np.zeros(num_gas))
     temps_spin = ma.array(np.zeros(num_gas))
     tau = np.zeros(num_gas)
+    maser_region = np.empty(num_gas, dtype=bool)
     filenames = np.empty(num_gas, dtype=object)
     local_paths = np.empty(num_gas, dtype=object)
     local_emission_paths = np.empty(num_gas, dtype=object)
@@ -177,6 +219,7 @@ def output_gas_catalogue(all_gas):
         else:
             temps_spin[i] = gas.t_s
         tau[i] = gas.tau
+        maser_region[i] = is_gas_near_maser(gas)
         # Need to read in spectra to get rating and include it in the catalogue and
         # link to the fit preview: e.g. plots/A/012.909-0.260_19_src4-1_fit
         prefix = 'day' + str(gas.day) + '/' + gas.field + \
@@ -194,10 +237,10 @@ def output_gas_catalogue(all_gas):
 
     temp_table = Table(
         [days, field_names, sources, velocities, em_velocities, optical_depths, temps_off, temps_spin, longitudes,
-         latitudes, ras, decs, comp_widths, vel_diff, equiv_width, tau,
+         latitudes, ras, decs, comp_widths, vel_diff, equiv_width, tau, maser_region,
          filenames, local_paths, local_emission_paths, local_spectra_paths],
         names=['Day', 'Field', 'Source', 'Velocity', 'em_velocity', 'Optical_Depth', 'temp_off', 'temp_spin',
-               'longitude', 'latitude', 'ra', 'dec', 'fwhm', 'vel_diff', 'equiv_width', 'tau',
+               'longitude', 'latitude', 'ra', 'dec', 'fwhm', 'vel_diff', 'equiv_width', 'tau', 'near_maser',
                'Filename', 'Local_Path', 'Local_Emission_Path', 'Local_Spectrum_Path'],
         meta={'ID': 'magmo_gas',
               'name': 'MAGMO Gas ' + str(datetime.date.today())})
@@ -220,8 +263,9 @@ def main():
     # Load component catalogue
     components = read_components("magmo-components.vot")
     spectra_map = read_spectra("magmo-spectra.vot")
+    mmb_map = read_mmb_cat('methanol_multibeam_catalogue.vot')
 
-    all_gas = analyse_components(components, spectra_map)
+    all_gas = analyse_components(components, spectra_map, mmb_map)
 
     # Output a catalogue
     output_gas_catalogue(all_gas)
