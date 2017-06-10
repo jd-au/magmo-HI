@@ -7,6 +7,7 @@
 
 from __future__ import print_function, division
 
+import argparse
 import magmo
 import sgps
 import os
@@ -32,6 +33,25 @@ from string import Template
 
 sn_min = 1.3
 num_chan = 627
+
+
+class IslandRange(object):
+    def __init__(self, isle_id):
+        self.isle_id = isle_id
+
+
+def parseargs():
+    """
+    Parse the command line arguments
+    :return: An args map with the parsed arguments
+    """
+    parser = argparse.ArgumentParser(
+        description="Find sources in the data for a day and produce spectra for each suitable source.")
+
+    parser.add_argument("day", help="The day number to be analysed.")
+
+    args = parser.parse_args()
+    return args
 
 
 def get_high_signal_fields(day_dir_name):
@@ -103,7 +123,11 @@ def read_sources(filename):
         print ("Found source %s at %.4f, %.4f with flux %.4f and rms of %.4f "
                "giving S/N of %.4f" % (id, ra, dec, flux, rms, sn))
         if sn > 10 and flux > 0.02:
-            sources.append([ra, dec, id, flux, row['island']])
+            src = dict(zip(results.dtype.names,row))
+            src['id'] = id
+            src['sn'] = sn
+            #sources.append([ra, dec, id, flux, row['island']])
+            sources.append(src)
         else:
             print ("Ignoring source at %.4f, %.4f due to low S/N of %.4f or "
                    "flux of %.4f" % (ra, dec, sn, flux))
@@ -125,6 +149,25 @@ def read_islands(filename):
     for row in results:
         islands[row['island']] = row
     return islands
+
+
+def calc_island_ranges(islands, pixel_size):
+    island_ranges = []
+    for island in islands.values():
+        ir = IslandRange(island['island'])
+        ra = island['ra']
+        dec = island['dec']
+        ra_width = abs(island['x_width'] * pixel_size[0])
+        dec_width = abs(island['y_width'] * pixel_size[1])
+        ir.min_ra = ra - (ra_width/2)
+        ir.max_ra = ra + (ra_width/2)
+        ir.min_dec = dec - (dec_width/2)
+        ir.max_dec = dec + (dec_width/2)
+        print("Island %d goes from %f to %f (%d*%f)/ %f to %f (%d*%f)" % (
+            island['island'], ir.min_ra, ir.max_ra, island['x_width'], pixel_size[0], ir.min_dec, ir.max_dec,
+            island['y_width'], pixel_size[1]))
+        island_ranges.append(ir)
+    return island_ranges
 
 
 def read_continuum_ranges():
@@ -190,13 +233,14 @@ def extract_spectra(daydirname, field):
     beam_min = header['BMIN'] * 60 * 60
     beam_area = math.radians(header['BMAJ']) * math.radians(header['BMIN'])
     print ("Beam was %f x %f arcsec giving area of %f radians^2." % (beam_maj, beam_min, beam_area))
+    ranges = calc_island_ranges(islands, (header['CDELT1'], header['CDELT2']))
     velocities = w.wcs_pix2world(10,10,index[:],0,0)[2]
     for src in sources:
-        pix = w.wcs_world2pix(src[0], src[1], 0, 0, 1)
+        pix = w.wcs_world2pix(src['ra'], src['dec'], 0, 0, 1)
         x_coord = int(round(pix[0])) - 1  # 266
         y_coord = int(round(pix[1])) - 1  # 197
         print ("Translated %.4f, %.4f to %d, %d" % (
-            src[0], src[1], x_coord, y_coord))
+            src['ra'], src['dec'], x_coord, y_coord))
 
         img_slice = image[0, :, y_coord, x_coord]
         l_edge, r_edge = find_edges(img_slice, num_edge_chan)
@@ -209,23 +253,21 @@ def extract_spectra(daydirname, field):
              velocities[l_edge:r_edge],
              img_slice[l_edge:r_edge]],
             names='plane,velocity,flux')
-        c = SkyCoord(src[0], src[1], frame='icrs', unit="deg")
+        c = SkyCoord(src['ra'], src['dec'], frame='icrs', unit="deg")
         spectra[c.galactic.l] = spectrum_array
 
-        isle = islands.get(src[4], None)
-        src_map = {'id': src[2], 'flux': src[3], 'pos': c, 'beam_area': beam_area}
-        if isle:
-            src_map['a'] = isle['a']
-            src_map['b'] = isle['b']
-            src_map['pa'] = isle['pa']
-        # [ra, dec, id, flux])
+        # isle = islands.get(src['island'], None)
+        src_map = {'id': src['id'], 'flux': src['peak_flux'], 'pos': c, 'beam_area': beam_area}
+        src_map['a'] = src['a']
+        src_map['b'] = src['b']
+        src_map['pa'] = src['pa']
         print (src_map)
         source_ids[c.galactic.l] = src_map
     del image
     del header
     hdulist.close()
 
-    return spectra, source_ids
+    return spectra, source_ids, ranges
 
 
 def get_mean_continuum(spectrum, longitude, continuum_ranges):
@@ -422,35 +464,83 @@ def output_emission_spectra(filename, longitude, latitude, velocity, em_mean,
     writeto(votable, filename)
 
 
-def calc_offset_points(longitude, latitude, beam_size, num_points=6):
+def point_in_ellipse(origin, point, a, b, pa_rad):
+    # Convert point to be in plane of the ellipse
+    p_ra_dist = point.icrs.ra.degree - origin.icrs.ra.degree
+    p_dec_dist = point.icrs.dec.degree - origin.icrs.dec.degree
+    x = p_ra_dist * math.cos(pa_rad) + p_dec_dist * math.sin(pa_rad)
+    y = - p_ra_dist * math.sin(pa_rad) + p_dec_dist * math.cos(pa_rad)
+
+    a_deg = a / 3600
+    b_deg = a / 3600
+
+    # Calc distance from origin relative to a/b
+    dist = math.sqrt((x / a_deg) ** 2 + (y / b_deg) ** 2)
+    print("Point %s is %f from ellipse %f, %f, %f at %s." % (point, dist, a, b, math.degrees(pa_rad), origin))
+    return dist <= 1.0
+
+
+def point_in_island(point, islands):
+    ra = point.icrs.ra.degree
+    dec = point.icrs.dec.degree
+    for island in islands:
+        if island.min_ra <= ra <= island.max_ra and island.min_dec <= dec <= island.max_dec:
+            print("Point %s in island %d at %f, %f" % (point, island.isle_id, island.min_ra, island.min_dec))
+            return True
+    print("Point %f, %f not in any of %d islands" % (ra, dec, len(islands)))
+    return False
+
+
+def calc_offset_points(longitude, latitude, beam_size, a, b, pa, islands, num_points=6, max_dist=0.04):
     spacing = 2.0 * math.pi / float(num_points)
+    origin = SkyCoord(longitude, latitude, frame='galactic', unit="deg")
+    pa_rad = math.radians(pa)
     points = []
     for i in range(0, num_points):
         angle = spacing * i
-        l = longitude + math.sin(angle)*beam_size
-        b = latitude + math.cos(angle)*beam_size
-        coord = SkyCoord(l, b, frame='galactic', unit="deg")
-        print ("Point at angle %f is %s" % (math.degrees(angle), str(coord)))
-        points.append(coord)
+        mult = 0.5
+        inside_component = True
+        while inside_component:
+            if mult*beam_size > max_dist:
+                coord = None
+                break;
+            g_l = longitude + math.sin(angle)*beam_size*mult
+            g_b = latitude + math.cos(angle)*beam_size*mult
+            coord = SkyCoord(g_l, g_b, frame='galactic', unit="deg")
+
+            inside_component = point_in_ellipse(origin, coord, a, b, pa_rad) or point_in_island(coord, islands)
+            mult += 0.5
+        if coord is None:
+            print("Point could not be found for angle %f within max dist of %f (mult %f)" % (
+                math.degrees(angle), max_dist, mult))
+        else:
+            print ("Point at angle %f is %s with mult %f" % (math.degrees(angle), str(coord), mult-0.5))
+            points.append(coord)
 
     return points
 
 
-def get_emission_spectra(centre, velocities, file_list, filename_prefix):
+def get_emission_spectra(centre, velocities, file_list, filename_prefix, a, b, pa, islands):
     """
     Extract SGPS emission spectra around a central point.
 
     :param centre: A SkyCoord containing the location of the central point
     :param velocities: The velocities list sothat the emission data can be matched.
     :param file_list: A list of dictionaries describing the SGPS files.
+    :paeram a: semi-major axis length in arcsec of the component ellipse
+    :paeram b: semi-minor axis length in arcsec of the component ellipse
+    :paeram pa: parallactic angle of the component ellipse
     :return: An array fo the mean and standard deviation of emission at each velocity.
     """
 
     #file_list = sgps.get_hi_file_list()
     filename = filename_prefix + '_emission.votable.xml'
     coords = calc_offset_points(centre.galactic.l.value,
-                                centre.galactic.b.value, 0.03611)
+                                centre.galactic.b.value, 0.03611, a, b, pa, islands)
     ems = sgps.extract_spectra(coords, file_list)
+    print("Found {} emission points from {} coords for point l={}, b={}".format(len(ems), len(coords),
+                                                                                centre.galactic.l.value,
+                                                                                centre.galactic.b.value))
     if ems:
         all_em = np.array([ems[i].flux for i in range(len(ems))])
         em_std = np.std(all_em, axis=0)
@@ -483,7 +573,7 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
         all_cont_sd = []
         all_opacity = []
         for field in field_list:
-            spectra, source_ids = extract_spectra(day_dir_name, field)
+            spectra, source_ids, islands = extract_spectra(day_dir_name, field)
             t = Template('<tr><td colspan=4><b>Field: ${field}</b></td></tr>\n' +
                          '<tr><td>Image Name</td><td>Details</td>' +
                          '<td>Absorption</td><td>Emission</td></tr>\n')
@@ -522,11 +612,12 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
                               "Spectra for source {0} in field {1}".format(
                                   src_data['id'], field), min_con_vel, max_con_vel)
                 filename = dir_prefix + name_prefix + '_opacity.votable.xml'
-                latitude = src_data[2].galactic.b
+                latitude = src_data['pos'].galactic.b
 
                 em_mean, em_std = get_emission_spectra(src_data['pos'],
                                                        spectrum.velocity,
-                                                       file_list, dir_prefix + name_prefix)
+                                                       file_list, dir_prefix + name_prefix,
+                                                       src_data['a'], src_data['b'], src_data['pa'], islands)
                 em_img_name = name_prefix + "_emission.png"
                 plot_emission_spectrum(spectrum.velocity, em_mean, em_std,
                                        dir_prefix + name_prefix + "_emission.png",
@@ -563,11 +654,8 @@ def main():
     :return: The exit code
     """
     # Read day parameter
-    if len(sys.argv) != 2:
-        print("Incorrect number of parameters.")
-        print("Usage: python analyse_data.py day")
-        return 1
-    day = sys.argv[1]
+    args = parseargs()
+    day = args.day
     start = time.time()
 
     # Check metadata against file system
