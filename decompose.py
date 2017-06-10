@@ -112,7 +112,7 @@ def convert_to_ratio(opacity):
     return 1 - opacity
 
 
-def prepare_spectra(spectra):
+def prepare_spectra(spectra, data_filename):
     data = {}
 
     # Convert to GaussPy format
@@ -146,15 +146,15 @@ def prepare_spectra(spectra):
         i += 1
 
     # Save the file to be used by GaussPy
-    pickle.dump(data, open(FILENAME_DATA_GAUSSPY, 'w'))
+    pickle.dump(data, open(data_filename, 'w'))
 
 
-def decompose(spectra, out_filename, alpha1, alpha2, snr_thresh):
+def decompose(spectra, out_filename, alpha1, alpha2, snr_thresh, data_filename):
     start = time.time()
     print("## Commenced decomposition at %s ##" %
           time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start)))
 
-    prepare_spectra(spectra)
+    prepare_spectra(spectra, data_filename)
 
     end_read = time.time()
     print("## Finished conversion of %d spectra at %s taking %.02f s ##" %
@@ -173,12 +173,18 @@ def decompose(spectra, out_filename, alpha1, alpha2, snr_thresh):
         g.set('alpha2', alpha2)
 
     # Run GaussPy
-    decomposed_data = g.batch_decomposition(FILENAME_DATA_GAUSSPY)
+    decomposed_data = g.batch_decomposition(data_filename)
 
     # Save decomposition information
     pickle.dump(decomposed_data, open(out_filename, 'w'))
 
     end = time.time()
+
+    if len(decomposed_data['means_fit']) != len(spectra):
+        print(
+            '###! WARNING: Original %d and decomposed spectra %d counts differ!' % (
+            len(spectra), len(decomposed_data['means_fit'])))
+
     print("## Finished decomposition of %d spectra at %s taking %.02f s ##" %
           (len(spectra), time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end)), (end - end_read)))
 
@@ -256,6 +262,60 @@ def output_component_catalogue(spectra, data, data_decomposed):
         # , ".", num_no_comps, "spectra (of", len(spectra), ") had no components found")
 
 
+def calc_residual(velo, opacity, fit_amps, fit_fwhms, fit_means):
+    g_sum = np.zeros(len(velo))
+    # Plot individual components
+    if len(fit_amps) > 0.:
+        for j in range(len(fit_amps)):
+            amp, fwhm, mean = fit_amps[j], fit_fwhms[j], fit_means[j]
+            yy = amp * np.exp(-4. * np.log(2) * (velo - mean) ** 2 / fwhm ** 2)
+            g_sum += yy
+    residual = opacity - g_sum
+    return residual
+
+
+def output_decomposition_catalogue(folder, spectra, data, data_decomposed):
+    days = []
+    field_names = []
+    sources = []
+    longitudes = []
+    latitudes = []
+    cont_sd = []
+    residual_rms = []
+    ratings = []
+    num_comps = []
+
+    for i in range(len(data_decomposed['fwhms_fit'])):
+        spectrum = spectra[data['spectrum_idx'][i]]
+
+        days.append(int(spectrum['Day']))
+        field_names.append(spectrum['Field'])
+        sources.append(spectrum['Source'])
+        longitudes.append(spectrum['Longitude'])
+        latitudes.append(spectrum['Latitude'])
+        ratings.append(spectrum['Rating'])
+        cont_sd.append(spectrum['Continuum_SD'])
+
+        fit_fwhms = data_decomposed['fwhms_fit'][i]
+        fit_means = data_decomposed['means_fit'][i]
+        fit_amps = data_decomposed['amplitudes_fit'][i]
+        num_comps.append(len(fit_fwhms))
+
+        velo = data['x_values'][i]
+        # opacity = convert_to_ratio(data['data_list'][i])
+        residual = calc_residual(velo, data['data_list'][i], fit_amps, fit_fwhms, fit_means)
+        residual_rms.append(np.sqrt(np.mean(np.square(residual))))
+
+    temp_table = Table(
+        [days, field_names, sources, longitudes, latitudes, residual_rms, ratings, num_comps, cont_sd],
+        names=['Day', 'Field', 'Source', 'Longitude', 'Latitude', 'Residual_RMS', 'Rating', 'Num_Comp', 'Continuum_SD'],
+        meta={'ID': 'magmo_decomposition',
+              'name': 'MAGMO Decomposition ' + str(datetime.date.today())})
+    votable = from_table(temp_table)
+    filename = folder + "/magmo-decomposition.vot"
+    writeto(votable, filename)
+
+
 def plot_single_spectrum(ax, velo, opacity, fit_amps, fit_fwhms, fit_means, name):
     g_sum = np.zeros(len(velo))
     ax.plot(velo, opacity, color='grey')
@@ -274,7 +334,7 @@ def plot_single_spectrum(ax, velo, opacity, fit_amps, fit_fwhms, fit_means, name
     return residual
 
 
-def plot_spectrum(velo, opacity, fit_amps, fit_fwhms, fit_means, name, filename):
+def plot_spectrum(velo, opacity, fit_amps, fit_fwhms, fit_means, name, filename, formats):
     fig = plt.figure(figsize=(8, 6))
     gs = gridspec.GridSpec(2, 1, height_ratios=[3, 1])
     ax = fig.add_subplot(gs[0])
@@ -291,14 +351,18 @@ def plot_spectrum(velo, opacity, fit_amps, fit_fwhms, fit_means, name, filename)
 
     plt.xlabel('LSR Velocity (km/s) n=%d rms=%.4f' % (len(fit_amps), residual_rms))
 
-    plt.savefig(filename)
+    for fmt in formats:
+        plt.savefig(filename + "." + fmt)
     plt.close()
+    return residual_rms
 
 
-def plot_spectra(spectra, data, data_decomposed):
-    magmo.ensure_dir_exists("plots")
+def plot_spectra(spectra, data, data_decomposed, alpha1, alpha2, folder='.'):
+    plot_folder = folder + "/plots"
+    magmo.ensure_dir_exists(plot_folder)
+    residuals = np.zeros(len(data_decomposed['fwhms_fit']))
     for rating in 'ABCDEF':
-        magmo.ensure_dir_exists("plots/" + rating)
+        magmo.ensure_dir_exists(plot_folder + "/" + rating)
 
     for i in range(len(data_decomposed['fwhms_fit'])):
         spectrum = spectra[data['spectrum_idx'][i]]
@@ -313,9 +377,11 @@ def plot_spectra(spectra, data, data_decomposed):
         day = str(spectrum['Day'])
         src_id = spectrum['Source']
         name = field_name + " src " + src_id + " on day " + day + "(" + rating + ")"
-        filename = "plots/" + rating + "/"
-        filename += field_name + "_" + day + "_src" + src_id + "_fit.pdf"
-        plot_spectrum(velo, opacity, fit_amps, fit_fwhms, fit_means, name, filename)
+        filename = plot_folder + "/" + rating + "/"
+        filename += field_name + "_" + day + "_src" + src_id + "_fit"
+        residuals[i] = plot_spectrum(velo, opacity, fit_amps, fit_fwhms, fit_means, name, filename, ('pdf', 'png'))
+    print("Residual RMS mean {:0.4} median {:0.4} sd {:0.4} for alphas {},{}".format(np.mean(residuals), np.median(residuals),
+                                                                           np.std(residuals), alpha1, alpha2))
 
 
 def plot_components(spectra, data_decomposed):
@@ -344,7 +410,7 @@ def get_samples(data, rating_count=[4, 1, 1], ratings='ABC'):
     return indexes
 
 
-def output_decomposition(spectra, out_filename, folder, data_filename):
+def output_decomposition(spectra, out_filename, folder, data_filename, alpha1, alpha2):
     # For each spectra:
     # Output plots
     # Output component catalogue
@@ -352,7 +418,7 @@ def output_decomposition(spectra, out_filename, folder, data_filename):
     max_results = 6 if len(spectra) > 6 else len(spectra)
     print(max_results)
 
-    data = pickle.load(open(FILENAME_DATA_GAUSSPY))
+    data = pickle.load(open(data_filename))
     data_decomposed = pickle.load(open(out_filename))
 
     index_values = get_samples(data)
@@ -376,9 +442,12 @@ def output_decomposition(spectra, out_filename, folder, data_filename):
         field_name = spectrum['Field']
         day = str(spectrum['Day'])
         src_id = spectrum['Source']
+
         name = field_name + " src " + src_id + " d " + day + "(" + rating + ")"
 
         residual = plot_single_spectrum(ax, x, y, fit_amps, fit_fwhms, fit_means, name)
+        residual_rms = np.sqrt(np.mean(np.square(residual)))
+        print (name, "has residual RMS of", residual_rms)
 
         if i % 3 == 0:
             ax.set_ylabel('$1 - e^{-\\tau}$')
@@ -395,10 +464,13 @@ def output_decomposition(spectra, out_filename, folder, data_filename):
         i += 1
 
     plt.tight_layout()
-    plt.savefig("magmo-decomp.pdf")
+    magmo.ensure_dir_exists(folder)
+    plt.savefig(folder + "/magmo-decomp.pdf")
+    plt.close()
 
     output_component_catalogue(spectra, data, data_decomposed)
-    plot_spectra(spectra, data, data_decomposed)
+    output_decomposition_catalogue(folder, spectra, data, data_decomposed)
+    plot_spectra(spectra, data, data_decomposed, alpha1, alpha2, folder=folder)
 
 
 def main():
@@ -413,13 +485,23 @@ def main():
     spectra = read_spectra(args.input)
     spectra = filter_spectra(spectra, args.long_min, args.long_max, args.quality)
 
+    alpha1_range = (4.36, 3)
+    alpha2_range = (9.37, 7)
+
+    #for i in range(0,1):  #len(alpha1_range)):
+    for i in range(len(alpha1_range)):
+        a1 = alpha1_range[i]
+        a2 = alpha2_range[i]
+        folder = "run"+ str(i+1)
+        magmo.ensure_dir_exists(folder)
+        data_filename = folder + "/" + FILENAME_DATA_GAUSSPY
 
         # Decompose all spectra
         if not args.plot_only:
-        decompose(spectra, args.output, args.alpha1, args.alpha2, args.snr_thresh)
+            decompose(spectra, folder+"/"+args.output, a1, a2, args.snr_thresh, data_filename)
 
         # Read in result
-    output_decomposition(spectra, args.output)
+        output_decomposition(spectra, folder+"/"+args.output, folder, data_filename, a1, a2)
 
     # Report
     end = time.time()
