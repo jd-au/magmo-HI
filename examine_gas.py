@@ -18,6 +18,8 @@ from string import Template
 import argparse
 import datetime
 import numpy as np
+import matplotlib
+import matplotlib.pyplot as plt
 import os
 import re
 import time
@@ -138,6 +140,12 @@ def analyse_components(components, spectra_map, mmb_map):
             spectrum = spectra_map[get_spectra_key(component['Day'], component['Field'], component['Source'])]
             gas.rating = spectrum['Rating']
 
+            # Validate the component velocity
+            if not spectrum['Min_Velocity'] <= comp_vel <= spectrum['Max_Velocity']:
+                print("WARNING: Ignoring gas component outside of spectrum. Min: {} Max: {} Component: {}".format(
+                    spectrum['Min_Velocity'], spectrum['Max_Velocity'], comp_vel))
+                continue
+
             loc = SkyCoord(gas.longitude, gas.latitude, frame='galactic', unit="deg")
             gas.loc = loc
             gas.ra = loc.icrs.ra.degree
@@ -170,7 +178,7 @@ def is_gas_near_maser(gas):
         return False
     if gas.loc.separation(gas.maser_loc).value > (2/60):
         return False
-    return gas.maser_vel_low <= gas.comp_vel <= gas.maser_vel_high
+    return gas.maser_vel_low-10 <= gas.comp_vel <= gas.maser_vel_high+10
 
 
 def output_gas_catalogue(all_gas):
@@ -250,6 +258,27 @@ def output_gas_catalogue(all_gas):
     table.get_field_by_id('dec').ucd = 'pos.eq.dec;meta.main'
     filename = "magmo-gas.vot"
     writeto(votable, filename)
+    return table
+
+
+def plot_equiv_width_lv(gas_table):
+    values = gas_table.array
+    cm = plt.cm.get_cmap('RdYlBu_r')
+    sc = plt.scatter(values['longitude'], values['Velocity'], c=values['equiv_width'], s=35, cmap=cm)
+    cb = plt.colorbar(sc, norm=matplotlib.colors.LogNorm())
+
+    ax = plt.gca()
+    ax.set_xlim(values['longitude'].max()+5, values['longitude'].min()-5)
+
+    plt.title("Equivalent Width of Fitted Gas Components")
+    plt.xlabel('Galactic longitude (deg)')
+    plt.ylabel('LSR Velocity (km/s)')
+    cb.set_label('Equivalent Width (km/s)')
+
+    filename = 'magmo-equiv-width-lv.pdf'
+    #plt.show()
+    plt.savefig(filename)
+    return None
 
 
 def main():
@@ -268,7 +297,8 @@ def main():
     all_gas = analyse_components(components, spectra_map, mmb_map)
 
     # Output a catalogue
-    output_gas_catalogue(all_gas)
+    gas_table = output_gas_catalogue(all_gas)
+    plot_equiv_width_lv(gas_table)
 
     # Report
     end = time.time()
