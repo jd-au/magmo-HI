@@ -14,7 +14,7 @@ from string import Template
 # Read day parameter
 if len(sys.argv) != 2:
     print("Incorrect number of parameters.")
-    print("Usage: python process_day.py day")
+    print("Usage: python image_1420.py day")
     exit(1)
 day = sys.argv[1]
 
@@ -32,7 +32,7 @@ line_band = {'main': '1420', 'freqs': ['1420', '1421', '1420.5'], 'line': True}
 
 error_list = []
 
-error_list.extend(process_day.build_images(dayDirName, sources, line_band, day))
+#error_list.extend(process_day.build_images(dayDirName, sources, line_band, day))
 
 img_idx = open(dayDirName + '/images-comp.html', 'w')
 t = Template('<html>\n<head><title>Day $day image previews</title></head>\n'
@@ -75,6 +75,8 @@ for src in sources:
             fig.show_grayscale(0, None, (max_1420 if freq == '1420' else max))
             # fig.show_grayscale(0, None, 0.1)
             fig.add_colorbar()
+            fig.add_beam()
+            fig.beam.set_color('red')
             fig.save(img)
             fig.close()
 

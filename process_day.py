@@ -300,6 +300,18 @@ def calibrate(dirname, bandpass_cal, sources, band_list, day):
     return error_list
 
 
+def plot_image(fits_file, out_file):
+    fig = aplpy.FITSFigure(fits_file)
+    fig.set_theme('publication')
+    fig.show_grayscale(0, None, 0.25)
+    fig.add_beam()
+    fig.beam.set_color('red')
+    fig.add_colorbar()
+    fig.save(out_file)
+    fig.close()
+    return
+
+
 def build_images(day_dir_name, sources, band, day):
     """
     Generate continuum images of each field.
@@ -355,12 +367,8 @@ def build_images(day_dir_name, sources, band, day):
             cmd = 'fits op=xyout in=' + restored_file + ' out=' + fits_file
             magmo.run_os_cmd(cmd)
 
-            fig = aplpy.FITSFigure(fits_file)
-            fig.set_theme('publication')
-            fig.show_grayscale(0, None, 0.25)
-            fig.add_colorbar()
-            fig.save(png_file)
-            fig.close()
+            plot_image(fits_file, png_file)
+
             t = Template('<tr><td><br>Source ${src_name}</td></tr>\n<tr>\n'
                          + '<td><a href="${png_file}"><img src="${png_file}" width="500px"></a></td></tr>')
             img_idx.write(t.substitute(png_file=png_file, src_name=src_name))
