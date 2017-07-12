@@ -236,13 +236,8 @@ def extract_spectra(daydirname, field):
     ranges = calc_island_ranges(islands, (header['CDELT1'], header['CDELT2']))
     velocities = w.wcs_pix2world(10,10,index[:],0,0)[2]
     for src in sources:
-        pix = w.wcs_world2pix(src['ra'], src['dec'], 0, 0, 1)
-        x_coord = int(round(pix[0])) - 1  # 266
-        y_coord = int(round(pix[1])) - 1  # 197
-        print ("Translated %.4f, %.4f to %d, %d" % (
-            src['ra'], src['dec'], x_coord, y_coord))
+        img_slice = get_integrated_spectrum(image, w, src)
 
-        img_slice = image[0, :, y_coord, x_coord]
         l_edge, r_edge = find_edges(img_slice, num_edge_chan)
         print("Using data range %d - %d out of %d channels." % (
             l_edge, r_edge, len(img_slice)))
@@ -268,6 +263,54 @@ def extract_spectra(daydirname, field):
     hdulist.close()
 
     return spectra, source_ids, ranges
+
+
+def get_integrated_spectrum(image, w, src):
+    """
+    Calculate the integrated spectrum of the component.
+    :param image: The image's data array
+    :param w: The image's world coordinate system definition
+    :param src: The details of the component being processed
+    :return: An array of average flux/pixel across the component at each velocity step
+    """
+    pix = w.wcs_world2pix(src['ra'], src['dec'], 0, 0, 1)
+    x_coord = int(round(pix[0])) - 1  # 266
+    y_coord = int(round(pix[1])) - 1  # 197
+    print("Translated %.4f, %.4f to %d, %d" % (
+        src['ra'], src['dec'], x_coord, y_coord))
+    y_min = y_coord-2
+    y_max = y_coord+2
+    x_min = x_coord-2
+    x_max = x_coord+2
+    #y_min = y_coord
+    #y_max = y_coord
+    #x_min = x_coord
+    #x_max = x_coord
+    data = np.copy(image[0, :, y_min:y_max+1, x_min:x_max+1])
+
+    origin = SkyCoord(src['ra'], src['dec'], frame='icrs', unit="deg")
+    pa_rad = math.radians(src['pa'])
+    total_pixels = (y_max-y_min +1) * (x_max-x_min +1)
+    outside_pixels = 0
+    for i in range(x_min, x_max+1):
+        for j in range(y_min, y_max+1):
+            eq_pos = w.wcs_pix2world(i+1, j+1, 0, 0, 1)
+            point = SkyCoord(eq_pos[0], eq_pos[1], frame='icrs', unit="deg")
+            if not point_in_ellipse(origin, point, src['a'], src['b'], pa_rad):
+                data[:, i-x_min, j-y_min] = 0
+                outside_pixels += 1
+    print("Found {} pixels out of {} inside the component {} at {} {}".format(total_pixels - outside_pixels, total_pixels,
+                                                                       src['id'],
+                                                                       point.galactic.l.degree,
+                                                                       point.galactic.b.degree))
+    integrated = np.sum(data, axis=(1,2))
+    inside_pixels = total_pixels - outside_pixels
+    if inside_pixels <= 0:
+        print ("Error: No data for component!")
+    else:
+        integrated /= inside_pixels
+
+    return integrated
 
 
 def get_mean_continuum(spectrum, longitude, continuum_ranges):
@@ -306,7 +349,7 @@ def get_mean_continuum(spectrum, longitude, continuum_ranges):
     continuum_sample = spectrum.flux[bin_start:bin_end]
     # print ("...gave sample of", continuum_sample)
     mean_cont = np.mean(continuum_sample)
-    sd_cont = np.std(continuum_sample)
+    sd_cont = np.std(continuum_sample/mean_cont)
     return mean_cont, sd_cont, continuum_start_vel, continuum_end_vel
 
 
