@@ -49,6 +49,8 @@ def parseargs():
         description="Find sources in the data for a day and produce spectra for each suitable source.")
 
     parser.add_argument("day", help="The day number to be analysed.")
+    parser.add_argument("--extract_only", help="Use the previous source finding results to extract spectra", default=False,
+                        action='store_true')
 
     args = parser.parse_args()
     return args
@@ -220,7 +222,7 @@ def extract_spectra(daydirname, field):
     if not os.path.exists(fits_filename):
         print ("Warning: File %s does not exist, skipping extraction." % \
               fits_filename)
-        return spectra, source_ids
+        return spectra, source_ids, []
 
     sources = read_sources(src_filename)
     islands = read_islands(isle_filename)
@@ -715,8 +717,9 @@ def main():
     field_list = get_high_signal_fields(day_dir_name)
 
     # For each file, find the sources
-    for field in field_list:
-        error_list.extend(find_sources(day_dir_name, field))
+    if not args.extract_only:
+        for field in field_list:
+            error_list.extend(find_sources(day_dir_name, field))
 
     # For each file, extract spectra
     continuum_ranges = magmo.get_continuum_ranges()
