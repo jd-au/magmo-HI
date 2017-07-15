@@ -160,6 +160,11 @@ def read_spectra():
             continuum_sd = calc_continuum_sd(spectrum, continuum_ranges)
             rating = calc_rating(opacity_range, max_s_max_n, continuum_sd, em_std)
 
+            loc = SkyCoord(gal_long, gal_lat, frame='galactic', unit="deg")
+            spectrum.loc = loc
+            spectrum.ra = loc.icrs.ra.degree
+            spectrum.dec = loc.icrs.dec.degree
+
             spectrum.opacity_range = opacity_range
             spectrum.max_s_max_n = max_s_max_n
             spectrum.continuum_sd = continuum_sd
@@ -502,6 +507,8 @@ def output_spectra_catalogue(spectra, isle_day_map):
     sources = np.empty(rows, dtype=object)
     longitudes = np.zeros(rows)
     latitudes = np.zeros(rows)
+    eq_ras = np.zeros(rows)
+    eq_decs = np.zeros(rows)
     max_flux = np.zeros(rows)
     max_opacity = np.zeros(rows)
     min_opacity = np.zeros(rows)
@@ -528,6 +535,8 @@ def output_spectra_catalogue(spectra, isle_day_map):
         sources[i] = spectrum.src_id
         longitudes[i] = spectrum.longitude
         latitudes[i] = spectrum.latitude
+        eq_ras[i] = spectrum.ra
+        eq_decs[i] = spectrum.dec
         max_flux[i] = np.max(spectrum.flux)
         min_opacity[i] = np.min(spectrum.opacities)
         max_opacity[i] = np.max(spectrum.opacities)
@@ -555,11 +564,11 @@ def output_spectra_catalogue(spectra, isle_day_map):
         i += 1
 
     spectra_table = Table(
-        [days, fields, sources, longitudes, latitudes, max_flux, min_opacity,
+        [days, fields, sources, longitudes, latitudes, eq_ras, eq_decs, max_flux, min_opacity,
          max_opacity, rms_opacity, min_velocity, max_velocity, used,
          opacity_range, max_s_max_n, continuum_sd, max_em_std, rating, resolved, duplicate,
          filenames, local_paths, local_emission_paths],
-        names=['Day', 'Field', 'Source', 'Longitude', 'Latitude', 'Max_Flux',
+        names=['Day', 'Field', 'Source', 'Longitude', 'Latitude', 'RA', 'Dec', 'Max_Flux',
                'Min_Opacity', 'Max_Opacity', 'RMS_Opacity', 'Min_Velocity',
                'Max_Velocity', 'Used', 'Opacity_Range', 'Max_S_Max_N',
                'Continuum_SD', 'max_em_std', 'Rating', 'Resolved', 'Duplicate',
