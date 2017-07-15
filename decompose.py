@@ -485,8 +485,8 @@ def main():
     spectra = read_spectra(args.input)
     spectra = filter_spectra(spectra, args.long_min, args.long_max, args.quality)
 
-    alpha1_range = (4.36, 3)
-    alpha2_range = (9.37, 7)
+    alpha1_range = (3, 4.36)
+    alpha2_range = (7, 9.37)
 
     #for i in range(0,1):  #len(alpha1_range)):
     for i in range(len(alpha1_range)):
