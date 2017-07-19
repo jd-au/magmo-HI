@@ -25,6 +25,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy import interpolate
+import scipy.stats as stats
+import seaborn as sns
 
 
 class Gas(object):
@@ -71,7 +73,7 @@ def read_spectra(filename):
     for row in spectra_array:
         key = get_spectra_key(row['Day'], row['Field'], row['Source'])
         spectra_map[key] = row
-    return spectra_map
+    return spectra_map, spectra_array
 
 
 def read_emission(filename):
@@ -141,6 +143,7 @@ def analyse_components(components, spectra_map, mmb_map):
             gas.tau = -1 * np.log(np.maximum(optical_depth, 1e-16))
             gas.t_off = None
             gas.t_s = None
+            gas.name = component['Source_Id']
 
             spectrum = spectra_map[get_spectra_key(component['Day'], component['Field'], component['Source'])]
             gas.rating = spectrum['Rating']
@@ -166,7 +169,7 @@ def analyse_components(components, spectra_map, mmb_map):
 
             all_gas.append(gas)
 
-            if t_off > 0 and comp_amp < 0.98:
+            if t_off > 0 and comp_amp > 0.02:
                 # Calculate spin temperature and column density
                 t_s = t_off / comp_amp
 
@@ -189,6 +192,7 @@ def is_gas_near_maser(gas):
 
 def output_gas_catalogue(all_gas):
     num_gas = len(all_gas)
+    names = []
     days = []
     field_names = []
     sources = []
@@ -213,6 +217,7 @@ def output_gas_catalogue(all_gas):
 
     for i in range(len(all_gas)):
         gas = all_gas[i]
+        names.append(gas.name)
         days.append(gas.day)
         field_names.append(gas.field)
         sources.append(gas.src)
@@ -250,12 +255,12 @@ def output_gas_catalogue(all_gas):
     equiv_width = np.abs((1 - optical_depths) * comp_widths)
 
     temp_table = Table(
-        [days, field_names, sources, velocities, em_velocities, optical_depths, temps_off, temps_spin, longitudes,
-         latitudes, ras, decs, comp_widths, vel_diff, equiv_width, tau, maser_region,
+        [names, days, field_names, sources, velocities, em_velocities, optical_depths, temps_off, temps_spin,
+         longitudes, latitudes, ras, decs, comp_widths, vel_diff, equiv_width, tau, maser_region,
          filenames, local_paths, local_emission_paths, local_spectra_paths],
-        names=['Day', 'Field', 'Source', 'Velocity', 'em_velocity', 'Optical_Depth', 'temp_off', 'temp_spin',
-               'longitude', 'latitude', 'ra', 'dec', 'fwhm', 'vel_diff', 'equiv_width', 'tau', 'near_maser',
-               'Filename', 'Local_Path', 'Local_Emission_Path', 'Local_Spectrum_Path'],
+        names=['Source_Id', 'Day', 'Field', 'Source', 'Velocity', 'em_velocity', 'Optical_Depth', 'temp_off',
+               'temp_spin', 'longitude', 'latitude', 'ra', 'dec', 'fwhm', 'vel_diff', 'equiv_width', 'tau',
+               'near_maser', 'Filename', 'Local_Path', 'Local_Emission_Path', 'Local_Spectrum_Path'],
         meta={'ID': 'magmo_gas',
               'name': 'MAGMO Gas ' + str(datetime.date.today())})
     votable = from_table(temp_table)
@@ -285,6 +290,33 @@ def plot_equiv_width_lv(gas_table):
     # plt.show()
     plt.savefig(filename)
     return None
+
+
+def plot_maser_comparison(gas_table):
+    print("## Comparing gas near and away from masers ##")
+
+    #df = pd.DataFrame(np.ma.filled(gas_array))
+    gas_array = gas_table.array
+    df = gas_table.to_table().to_pandas()
+    grid = sns.FacetGrid(df, col="near_maser", margin_titles=True, sharey=False)
+    bins = np.logspace(0.01, 3.1, 21)
+    grid.map(plt.hist, "temp_spin", color="steelblue", lw=0, bins=bins)
+    plt.savefig('near_maser_temp.pdf')
+
+    ts = gas_array['temp_spin']
+    indexes = [~np.isnan(ts)]
+    ts_gas = gas_array[indexes]
+
+    print(ts[0:10], ts_gas[0:10])
+    near_maser = ts_gas[ts_gas['near_maser']]
+    away_maser = ts_gas[ts_gas['near_maser'] == False]
+    print(near_maser[0:10], away_maser[0:10])
+    print("Median near:{} v away:{} , sd n:{} v a:{}".format(np.median(near_maser['temp_spin']),
+                                                             np.median(away_maser['temp_spin']),
+                                                             np.std(near_maser['temp_spin']),
+                                                             np.std(away_maser['temp_spin'])))
+    statistic, p_value = stats.ks_2samp(np.ma.filled(near_maser['temp_spin']), np.ma.filled(away_maser['temp_spin']))
+    print ('Population similarity p_value={}'.format(p_value))
 
 
 def find_best_matches(magmo_coords, other_coords, max_dist, magmo_table):
@@ -430,6 +462,15 @@ def plot_source(title1, title2, brown_data, resampled_spec, cont_sd, filename):
     return
 
 
+def assess_match(brown_data, resampled_spec, cont_sd):
+    noise_threshold = 4*cont_sd
+    residual = resampled_spec - brown_data['col5']
+    abs_residual = np.abs(residual)
+    noisy = residual[abs_residual > noise_threshold]
+    #print ("Found {} out {} outside noise threshold {}".format(len(noisy), len(residual), noise_threshold))
+    return len(noisy)
+
+
 def compare_brown_2014(magmo_coords, magmo_table):
     """
     Compare the MAGMO spectra with the Brown et al 2014 SGPS spectra for HII regions.
@@ -449,7 +490,10 @@ def compare_brown_2014(magmo_coords, magmo_table):
     dist_col = Column(name='Separation', data=matches[:, 2], unit=u.degree)
     combined.add_column(dist_col)
     combined.sort('GLON')
-    combined.write('bm-combined.vot', format='votable', overwrite=True)
+    noisy_count = np.zeros(len(combined))
+    dist_col = Column(name='Noisy_Count', data=noisy_count,
+                      description='Count of optical depth measurements more than 4 sigma difference between MAGMO and SGPS')
+    combined.add_column(dist_col)
 
     # Produce plots and a latex template
     i = 1
@@ -466,6 +510,8 @@ def compare_brown_2014(magmo_coords, magmo_table):
             resampled_spec = resample(spectrum['opacity'], spectrum['velocity'], brown_data['col1'] * 1000)
             cont_sd = match_row['Continuum_SD']
 
+            match_row['Noisy_Count'] = assess_match(brown_data, resampled_spec, cont_sd)
+
             title1 = match_row['SIMBAD']
             title2 = 'Day {} Field {} Src {}'.format(match_row['Day'], match_row['Field'], match_row['Source'])
             filename = get_brown_graph_filename(match_row['GLON'], match_row['GLAT'])
@@ -478,8 +524,9 @@ def compare_brown_2014(magmo_coords, magmo_table):
             latex_doc.write('\\end{figure}\n')
             i += 1
 
-    brown_table.write('sgps-hii.csv', format='csv', overwrite='True')
-    combined.write('bm-combined.csv', format='csv', overwrite='True')
+    brown_table.write('sgps-hii.csv', format='csv', overwrite=True)
+    combined.write('bm-combined.vot', format='votable', overwrite=True)
+    combined.write('bm-combined.csv', format='csv', overwrite=True)
     return len(matches)
 
 
@@ -522,7 +569,7 @@ def main():
     # Load component catalogue
     if not args.compare_only:
         components = read_components("magmo-components.vot")
-        spectra_map = read_spectra("magmo-spectra.vot")
+        spectra_map, spectra_array = read_spectra("magmo-spectra.vot")
         mmb_map = read_mmb_cat('methanol_multibeam_catalogue.vot')
 
         all_gas = analyse_components(components, spectra_map, mmb_map)
@@ -530,6 +577,9 @@ def main():
         # Output a catalogue
         gas_table = output_gas_catalogue(all_gas)
         plot_equiv_width_lv(gas_table)
+
+        # Plots of MAGMO specific
+        plot_maser_comparison(gas_table)
 
     # Comparisons
     magmo_coords, magmo_table = get_magmo_table()
