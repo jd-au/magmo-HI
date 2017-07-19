@@ -43,7 +43,7 @@ def parseargs():
     parser.add_argument("--long_max", help="The largest longitude to be decomposed",
                         type=int, default=180)
     parser.add_argument("-q", "--quality", help="The minimum quality level to include",
-                        default='C')
+                        default='B')
     parser.add_argument("-o", "--output", help="The file name of the decomposition result.",
                         default='magmo-decomp.pickle')
     parser.add_argument("--plot_only", help="Produce plots for the result of a previous decomposition", default=False,
@@ -190,6 +190,7 @@ def decompose(spectra, out_filename, alpha1, alpha2, snr_thresh, data_filename):
 
 
 def output_component_catalogue(spectra, data, data_decomposed):
+    names = []
     days = []
     field_names = []
     sources = []
@@ -237,14 +238,15 @@ def output_component_catalogue(spectra, data, data_decomposed):
                 amps_fit_errs.append(means_fit_err[j])
                 fwhms_fit_errs.append(fwhms_fit_err[j])
                 means_fit_errs.append(amplitudes_fit_err[j])
+                names.append(spectrum['Source_Id'])
         else:
             rating = spectrum['Rating']
             num_no_comps[rating] = num_no_comps.get(rating, 0) + 1
 
     temp_table = Table(
-        [days, field_names, sources, longitudes, latitudes, amps, fwhms, means, best_fit_rchi2s, amps_fit_errs,
+        [names, days, field_names, sources, longitudes, latitudes, amps, fwhms, means, best_fit_rchi2s, amps_fit_errs,
          fwhms_fit_errs, means_fit_errs],
-        names=['Day', 'Field', 'Source', 'Longitude', 'Latitude', 'Amplitude', 'FWHM', 'Mean', 'Best Fit Rchi2',
+        names=['Source_Id', 'Day', 'Field', 'Source', 'Longitude', 'Latitude', 'Amplitude', 'FWHM', 'Mean', 'Best Fit Rchi2',
                'Amplitude Fit Err', 'FWHM Fit Err', 'Mean Fit Err'],
         meta={'ID': 'magmo_components',
               'name': 'MAGMO Components ' + str(datetime.date.today())})
@@ -275,6 +277,7 @@ def calc_residual(velo, opacity, fit_amps, fit_fwhms, fit_means):
 
 
 def output_decomposition_catalogue(folder, spectra, data, data_decomposed):
+    names = []
     days = []
     field_names = []
     sources = []
@@ -288,6 +291,7 @@ def output_decomposition_catalogue(folder, spectra, data, data_decomposed):
     for i in range(len(data_decomposed['fwhms_fit'])):
         spectrum = spectra[data['spectrum_idx'][i]]
 
+        names.append(spectrum['Source_Id'])
         days.append(int(spectrum['Day']))
         field_names.append(spectrum['Field'])
         sources.append(spectrum['Source'])
@@ -307,8 +311,9 @@ def output_decomposition_catalogue(folder, spectra, data, data_decomposed):
         residual_rms.append(np.sqrt(np.mean(np.square(residual))))
 
     temp_table = Table(
-        [days, field_names, sources, longitudes, latitudes, residual_rms, ratings, num_comps, cont_sd],
-        names=['Day', 'Field', 'Source', 'Longitude', 'Latitude', 'Residual_RMS', 'Rating', 'Num_Comp', 'Continuum_SD'],
+        [names, days, field_names, sources, longitudes, latitudes, residual_rms, ratings, num_comps, cont_sd],
+        names=['Source_Id', 'Day', 'Field', 'Source', 'Longitude', 'Latitude', 'Residual_RMS', 'Rating', 'Num_Comp',
+               'Continuum_SD'],
         meta={'ID': 'magmo_decomposition',
               'name': 'MAGMO Decomposition ' + str(datetime.date.today())})
     votable = from_table(temp_table)
@@ -325,9 +330,9 @@ def plot_single_spectrum(ax, velo, opacity, fit_amps, fit_fwhms, fit_means, name
             amp, fwhm, mean = fit_amps[j], fit_fwhms[j], fit_means[j]
             yy = amp * np.exp(-4. * np.log(2) * (velo - mean) ** 2 / fwhm ** 2)
             g_sum += yy
-            #yy = convert_to_ratio(yy)
+            yy = convert_to_ratio(yy)
             ax.plot(velo, yy, '--', lw=0.5, color='purple')
-    #g_sum = convert_to_ratio(g_sum)
+    g_sum = convert_to_ratio(g_sum)
     ax.plot(velo, g_sum, '-', lw=1.0, color='blue')
     plt.title(name)
     residual = opacity - g_sum
@@ -342,7 +347,7 @@ def plot_spectrum(velo, opacity, fit_amps, fit_fwhms, fit_means, name, filename,
     y = convert_from_ratio(opacity)
     residual = plot_single_spectrum(ax, velo, y, fit_amps, fit_fwhms, fit_means, name)
     residual_rms = np.sqrt(np.mean(np.square(residual)))
-    ax.set_ylabel('$1 - e^{-\\tau}$')
+    ax.set_ylabel('$e^{-\\tau}$')
 
     # Residual plot
     ax = fig.add_subplot(gs[1])
@@ -352,7 +357,7 @@ def plot_spectrum(velo, opacity, fit_amps, fit_fwhms, fit_means, name, filename,
     plt.xlabel('LSR Velocity (km/s) n=%d rms=%.4f' % (len(fit_amps), residual_rms))
 
     for fmt in formats:
-        plt.savefig(filename + "." + fmt)
+        plt.savefig(filename + "." + fmt, bbox_inches="tight")
     plt.close()
     return residual_rms
 
@@ -367,8 +372,7 @@ def plot_spectra(spectra, data, data_decomposed, alpha1, alpha2, folder='.'):
     for i in range(len(data_decomposed['fwhms_fit'])):
         spectrum = spectra[data['spectrum_idx'][i]]
         velo = data['x_values'][i]
-        #opacity = 1 - data['data_list'][i]
-        opacity = convert_to_ratio(data['data_list'][i])
+        opacity = data['data_list'][i]
         fit_fwhms = data_decomposed['fwhms_fit'][i]
         fit_means = data_decomposed['means_fit'][i]
         fit_amps = data_decomposed['amplitudes_fit'][i]
