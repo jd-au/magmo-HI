@@ -164,6 +164,11 @@ def read_spectra():
             spectrum.loc = loc
             spectrum.ra = loc.icrs.ra.degree
             spectrum.dec = loc.icrs.dec.degree
+            hms = loc.icrs.ra.hms
+            dms = loc.icrs.dec.dms
+            spectrum.name = 'J{:=02.0f}{:=02.0f}{:=02.0f}{:=+03.0f}{:=02.0f}{:=02.0f}'.format(hms[0], hms[1], hms[2],
+                                                                                                dms[0], abs(dms[1]),
+                                                                                                abs(dms[2]))
 
             spectrum.opacity_range = opacity_range
             spectrum.max_s_max_n = max_s_max_n
@@ -502,6 +507,7 @@ def output_spectra_catalogue(spectra, isle_day_map):
     :return: None
     """
     rows = len(spectra)
+    ids = np.empty(rows, dtype=object)
     days = np.zeros(rows, dtype=int)
     fields = np.empty(rows, dtype=object)
     sources = np.empty(rows, dtype=object)
@@ -530,6 +536,7 @@ def output_spectra_catalogue(spectra, isle_day_map):
     base_path = os.path.realpath('.')
     i = 0
     for spectrum in spectra:
+        ids[i] = spectrum.name
         days[i] = int(spectrum.day)
         fields[i] = spectrum.field_name
         sources[i] = spectrum.src_id
@@ -564,11 +571,11 @@ def output_spectra_catalogue(spectra, isle_day_map):
         i += 1
 
     spectra_table = Table(
-        [days, fields, sources, longitudes, latitudes, eq_ras, eq_decs, max_flux, min_opacity,
+        [ids, days, fields, sources, longitudes, latitudes, eq_ras, eq_decs, max_flux, min_opacity,
          max_opacity, rms_opacity, min_velocity, max_velocity, used,
          opacity_range, max_s_max_n, continuum_sd, max_em_std, rating, resolved, duplicate,
          filenames, local_paths, local_emission_paths],
-        names=['Day', 'Field', 'Source', 'Longitude', 'Latitude', 'RA', 'Dec', 'Max_Flux',
+        names=['Source_Id', 'Day', 'Field', 'Source', 'Longitude', 'Latitude', 'RA', 'Dec', 'Max_Flux',
                'Min_Opacity', 'Max_Opacity', 'RMS_Opacity', 'Min_Velocity',
                'Max_Velocity', 'Used', 'Opacity_Range', 'Max_S_Max_N',
                'Continuum_SD', 'max_em_std', 'Rating', 'Resolved', 'Duplicate',
@@ -853,7 +860,7 @@ def main():
     output_spectra_catalogue(spectra, isle_day_map)
 
     # calculate single phase spin temp for A-C
-    output_single_phase_catalogue(spectra)
+    #output_single_phase_catalogue(spectra)
 
     plot_spectra(spectra)
 
