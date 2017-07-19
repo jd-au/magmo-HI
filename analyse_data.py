@@ -210,7 +210,7 @@ def find_edges(fluxes, num_edge_chan):
     return l_edge + num_edge_chan, r_edge - num_edge_chan
 
 
-def extract_spectra(daydirname, field):
+def extract_spectra(daydirname, field, continuum_ranges):
     num_edge_chan = 10
     fits_filename = "{0}/1420/magmo-{1}_1420_sl_restor.fits".format(daydirname,
                                                                     field)
@@ -238,7 +238,9 @@ def extract_spectra(daydirname, field):
     ranges = calc_island_ranges(islands, (header['CDELT1'], header['CDELT2']))
     velocities = w.wcs_pix2world(10,10,index[:],0,0)[2]
     for src in sources:
-        img_slice = get_integrated_spectrum(image, w, src)
+        c = SkyCoord(src['ra'], src['dec'], frame='icrs', unit="deg")
+
+        img_slice = get_integrated_spectrum(image, w, src, velocities, c.galactic.l.value, continuum_ranges)
 
         l_edge, r_edge = find_edges(img_slice, num_edge_chan)
         print("Using data range %d - %d out of %d channels." % (
@@ -250,7 +252,6 @@ def extract_spectra(daydirname, field):
              velocities[l_edge:r_edge],
              img_slice[l_edge:r_edge]],
             names='plane,velocity,flux')
-        c = SkyCoord(src['ra'], src['dec'], frame='icrs', unit="deg")
         spectra[c.galactic.l] = spectrum_array
 
         # isle = islands.get(src['island'], None)
@@ -267,7 +268,47 @@ def extract_spectra(daydirname, field):
     return spectra, source_ids, ranges
 
 
-def get_integrated_spectrum(image, w, src):
+def get_weighting_array(data, velocities, longitude, continuum_ranges):
+    """
+    Calculate the mean of the continuum values. This is based on precalculated regions where there is no gas expected.
+    :param data: A cubelet to be analysed, should be a 3D of flux values.
+    :param planes: A umpy array of plane, and velocity values.
+    :param longitude: The galactic longitude of the target object
+    :param continuum_ranges: The predefined continuum blocks by longitude range
+    :return: A 2D array of weighting values for the
+    """
+    continuum_start_vel, continuum_end_vel = magmo.lookup_continuum_range(
+        continuum_ranges, int(longitude))
+
+    print(
+        "Looking for velocity range %d to %d in data of %d to %d at longitude %.3f" %
+        (continuum_start_vel, continuum_end_vel,
+         np.min(velocities) / 1000.0,
+         np.max(velocities) / 1000.0, longitude))
+
+    continuum_range = np.where(
+        continuum_start_vel*1000 < velocities)
+    if len(continuum_range) ==0:
+        return np.zeros(data.shape[1:2])
+
+    bin_start = continuum_range[0][0]
+    continuum_range = np.where(velocities < continuum_end_vel*1000)
+    bin_end = continuum_range[0][-1]
+
+    print("Using bins %d to %d (velocity range %d to %d) out of %d" % (
+        bin_start, bin_end, continuum_start_vel, continuum_end_vel, len(velocities)))
+    print (data.shape)
+    continuum_sample = data[bin_start:bin_end, :, :]
+    print ("...gave sample of", continuum_sample)
+    mean_cont = np.mean(continuum_sample, axis=0)
+    mean_sq = mean_cont ** 2
+    sum_sq = np.sum(mean_sq)
+    weighting = mean_sq / sum_sq
+    print ("Got weighting of {} from {} and {}".format(weighting, mean_sq, sum_sq))
+    return weighting
+
+
+def get_integrated_spectrum(image, w, src, velocities, longitude, continuum_ranges):
     """
     Calculate the integrated spectrum of the component.
     :param image: The image's data array
@@ -280,14 +321,11 @@ def get_integrated_spectrum(image, w, src):
     y_coord = int(round(pix[1])) - 1  # 197
     print("Translated %.4f, %.4f to %d, %d" % (
         src['ra'], src['dec'], x_coord, y_coord))
-    y_min = y_coord-2
-    y_max = y_coord+2
-    x_min = x_coord-2
-    x_max = x_coord+2
-    #y_min = y_coord
-    #y_max = y_coord
-    #x_min = x_coord
-    #x_max = x_coord
+    radius = 2
+    y_min = y_coord - radius
+    y_max = y_coord + radius
+    x_min = x_coord - radius
+    x_max = x_coord + radius
     data = np.copy(image[0, :, y_min:y_max+1, x_min:x_max+1])
 
     origin = SkyCoord(src['ra'], src['dec'], frame='icrs', unit="deg")
@@ -305,7 +343,8 @@ def get_integrated_spectrum(image, w, src):
                                                                        src['id'],
                                                                        point.galactic.l.degree,
                                                                        point.galactic.b.degree))
-    integrated = np.sum(data, axis=(1,2))
+    weighting = get_weighting_array(data, velocities, longitude, continuum_ranges)
+    integrated = np.sum(data * weighting, axis=(1, 2))
     inside_pixels = total_pixels - outside_pixels
     if inside_pixels <= 0:
         print ("Error: No data for component!")
@@ -317,10 +356,7 @@ def get_integrated_spectrum(image, w, src):
 
 def get_mean_continuum(spectrum, longitude, continuum_ranges):
     """
-    Calculate the mean of the continuum values. Will divide the spectrum
-    into continuum and line parts based on those values with a 1 sigma
-    deviation from the mean of the first 5% of values.  This assumes that
-    there is a leading continuum block in the spectrum.
+    Calculate the mean of the continuum values. This is based on precalculated regions where there is no gas expected.
     :param spectrum: The spectrum to be analysed, should be a numpy array of
         plane, velocity and flux values.
     :param longitude: The galactic longitude of the target object
@@ -618,7 +654,7 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
         all_cont_sd = []
         all_opacity = []
         for field in field_list:
-            spectra, source_ids, islands = extract_spectra(day_dir_name, field)
+            spectra, source_ids, islands = extract_spectra(day_dir_name, field, continuum_ranges)
             t = Template('<tr><td colspan=4><b>Field: ${field}</b></td></tr>\n' +
                          '<tr><td>Image Name</td><td>Details</td>' +
                          '<td>Absorption</td><td>Emission</td></tr>\n')
