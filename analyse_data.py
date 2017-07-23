@@ -299,7 +299,7 @@ def get_weighting_array(data, velocities, longitude, continuum_ranges):
         bin_start, bin_end, continuum_start_vel, continuum_end_vel, len(velocities)))
     print (data.shape)
     continuum_sample = data[bin_start:bin_end, :, :]
-    print ("...gave sample of", continuum_sample)
+    # print ("...gave sample of", continuum_sample)
     mean_cont = np.mean(continuum_sample, axis=0)
     mean_sq = mean_cont ** 2
     sum_sq = np.sum(mean_sq)
@@ -422,7 +422,14 @@ def get_temp_bright(spectrum, beam_area, wavelen=0.210996048, ):
     return factor * spectrum.flux
 
 
-def plot_spectrum(x, y, filename, title, con_start_vel, con_end_vel):
+def name_spectrum(loc):
+    precision = 1000
+    glong = (loc.galactic.l.degree * precision // 1) / precision
+    glat = (loc.galactic.b.degree * precision // 1) / precision
+    return 'MAGMOHI G{:0=7.3f}{:=+06.3f}'.format(glong, glat)
+
+
+def plot_spectrum(x, y, filename, title, con_start_vel, con_end_vel, sigma_tau):
     """
     Output a plot of opacity vs LSR velocity to a specified file.
 
@@ -436,6 +443,11 @@ def plot_spectrum(x, y, filename, title, con_start_vel, con_end_vel):
     """
     fig = plt.figure()
     plt.plot(x/1000, y)
+
+    if len(sigma_tau) > 0:
+        tau_max = 1 + sigma_tau
+        tau_min = 1 - sigma_tau
+        plt.fill_between(x/1000, tau_min, tau_max, facecolor='lightgray', color='lightgray')
 
     plt.axhline(1, color='r')
     plt.axvline(con_start_vel, color='g', linestyle='dashed')
@@ -490,7 +502,8 @@ def plot_emission_spectrum(velocity, em_mean, em_std, filename, title, con_start
     return
 
 
-def output_spectra(spectrum, opacity, filename, longitude, latitude, em_mean, em_std, temp_bright, beam_area):
+def output_spectra(spectrum, opacity, filename, longitude, latitude, em_mean, em_std, temp_bright, beam_area,
+                   sigma_tau):
     """
     Write the spectrum (velocity, flux and opacity) to a votable format file.
 
@@ -506,6 +519,7 @@ def output_spectra(spectrum, opacity, filename, longitude, latitude, em_mean, em
     table.add_column(Column(name='opacity', data=opacity))
     table.add_column(Column(name='flux', data=spectrum.flux, unit='Jy', description='Flux per beam'))
     table.add_column(Column(name='temp_brightness', data=temp_bright, unit='K'))
+    table.add_column(Column(name='sigma_tau', data=sigma_tau, description='Noise in the absorption profile'))
     if len(em_mean) > 0:
         # The emission may not be available, so don't include it if not
         table.add_column(Column(name='em_mean', data=em_mean, unit='K'))
@@ -641,6 +655,24 @@ def get_emission_spectra(centre, velocities, file_list, filename_prefix, a, b, p
     return [], []
 
 
+def calc_sigma_tau(cont_sd, em_mean, opacity):
+    """
+    Calculate the noise in the absorption profile at each velocity step. Where emission data is available, this is
+    based on the increased antenna temperature due to the received emission.
+
+    :param cont_sd: The measured noise in the continuum region of the spectrum in absorption units.
+    :param em_mean: The mean emission brightness temperature in K
+    :param opacity: The optical depth spectrum, used only for the shape of the data
+    :return: A numpy array containing the noise level in the optical depth data at each velocity step.
+    """
+    tsys = 44.7
+    if len(em_mean) > 0:
+        sigma_tau = cont_sd * ((tsys + em_mean) / tsys)
+    else:
+        sigma_tau = np.full(opacity.shape, cont_sd)
+    return sigma_tau
+
+
 def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
     file_list = sgps.get_hi_file_list()
     with open(day_dir_name + '/spectra.html', 'w') as spectra_idx:
@@ -673,49 +705,52 @@ def produce_spectra(day_dir_name, day, field_list, continuum_ranges):
                 if mean is None:
                     print("WARNING: Skipped spectrum %s with no continuum data" % (name_prefix, mean))
                     no_mean += 1
-                    continue;
+                    continue
 
                 if mean < 0:
                     print(("WARNING: Skipped spectrum %s with negative " +
                           "mean: %.5f") % (name_prefix, mean))
                     neg_mean += 1
-                    continue;
+                    continue
 
-                print('Continuum mean of %s is %.5f Jy, sd %.5f' % (
-                    name_prefix, mean, cont_sd))
+                spectrum_name = name_spectrum(src_data['pos'])
+                print('Continuum mean of %s (%s) is %.5f Jy, sd %.5f' % (
+                    spectrum_name, name_prefix, mean, cont_sd))
                 all_cont_sd.append(cont_sd)
                 opacity = get_opacity(spectrum, mean)
                 temp_bright = get_temp_bright(spectrum, src_data['beam_area'])
-                # print opacity
                 dir_prefix = day_dir_name + "/"
-                img_name = name_prefix + "_plot.png"
-                plot_spectrum(spectrum.velocity, opacity, dir_prefix + img_name,
-                              "Spectra for source {0} in field {1}".format(
-                                  src_data['id'], field), min_con_vel, max_con_vel)
-                filename = dir_prefix + name_prefix + '_opacity.votable.xml'
-                latitude = src_data['pos'].galactic.b
 
                 em_mean, em_std = get_emission_spectra(src_data['pos'],
                                                        spectrum.velocity,
                                                        file_list, dir_prefix + name_prefix,
                                                        src_data['a'], src_data['b'], src_data['pa'], islands)
+                # print opacity
+                sigma_tau = calc_sigma_tau(cont_sd, em_mean, opacity)
+                img_name = name_prefix + "_plot.png"
+                plot_spectrum(spectrum.velocity, opacity, dir_prefix + img_name,
+                              "Spectra for source {}".format(
+                                  spectrum_name), min_con_vel, max_con_vel, sigma_tau)
+                filename = dir_prefix + name_prefix + '_opacity.votable.xml'
+                latitude = src_data['pos'].galactic.b
+
                 em_img_name = name_prefix + "_emission.png"
                 plot_emission_spectrum(spectrum.velocity, em_mean, em_std,
                                        dir_prefix + name_prefix + "_emission.png",
-                                       "Emission around source {0} in field {1}".format(
-                                           src_data['id'], field), min_con_vel,
+                                       "Emission around {0}".format(
+                                           spectrum_name), min_con_vel,
                                        max_con_vel)
                 output_spectra(spectrum, opacity, filename, longitude, latitude,
-                               em_mean, em_std, temp_bright, src_data['beam_area'])
+                               em_mean, em_std, temp_bright, src_data['beam_area'], sigma_tau)
                 all_opacity.append(opacity)
 
-                t = Template('<tr><td>${img}</td><td>l:&nbsp;${longitude}<br/>' +
+                t = Template('<tr><td>${img}</td><td>${name}<br/>l:&nbsp;${longitude}<br/>' +
                              'Peak:&nbsp;${peak_flux}&nbsp;Jy<br/>Mean:&nbsp;${mean}&nbsp;Jy<br/>'
                              'Cont&nbsp;SD:&nbsp;${cont_sd}</td><td><a href="${img}">' +
                              '<img src="${img}" width="500px"></a></td><td><a href="${em_img}">' +
                              '<img src="${em_img}" width="500px"></a></td></tr>\n')
                 spectra_idx.write(t.substitute(img=img_name, em_img=em_img_name, peak_flux=src_data['flux'],
-                                               longitude=longitude, mean=mean, cont_sd=cont_sd))
+                                               longitude=longitude, mean=mean, cont_sd=cont_sd, name=spectrum_name))
 
 
         spectra_idx.write('</table></body></html>\n')
