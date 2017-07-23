@@ -183,7 +183,7 @@ def name_spectrum(loc):
     precision = 1000
     glong = (loc.galactic.l.degree * precision // 1) / precision
     glat = (loc.galactic.b.degree * precision // 1) / precision
-    return 'MAGMOHI G{:0=8.3f}{:=+07.3f}'.format(glong, glat)
+    return 'MAGMOHI G{:0=7.3f}{:=+06.3f}'.format(glong, glat)
 
 
 def read_field_stats():
