@@ -11,24 +11,25 @@
 
 from __future__ import print_function, division
 
-from astropy.coordinates import SkyCoord
-from astropy.io import fits, votable
-from astropy.io.votable import parse, from_table, writeto
-from astropy.table import Table, Column
-from scipy import ndimage
-
 import argparse
 import csv
 import datetime
 import glob
-import magmo
-import math
-import matplotlib.pyplot as plt
-import numpy as np
-from numpy import ma
 import os
 import re
 import time
+
+from astropy.coordinates import SkyCoord, matching
+from astropy.io import fits, votable
+from astropy.io.votable import parse, from_table, writeto
+from astropy.table import Table, Column
+import astropy.units as u
+import matplotlib.pyplot as plt
+import numpy as np
+from numpy import ma
+from scipy import ndimage
+
+import magmo
 
 
 class Field(object):
@@ -164,11 +165,7 @@ def read_spectra():
             spectrum.loc = loc
             spectrum.ra = loc.icrs.ra.degree
             spectrum.dec = loc.icrs.dec.degree
-            hms = loc.icrs.ra.hms
-            dms = loc.icrs.dec.dms
-            spectrum.name = 'J{:=02.0f}{:=02.0f}{:=02.0f}{:=+03.0f}{:=02.0f}{:=02.0f}'.format(hms[0], hms[1], hms[2],
-                                                                                                dms[0], abs(dms[1]),
-                                                                                                abs(dms[2]))
+            spectrum.name = name_spectrum(loc)
 
             spectrum.opacity_range = opacity_range
             spectrum.max_s_max_n = max_s_max_n
@@ -180,6 +177,13 @@ def read_spectra():
             spectra.append(spectrum)
 
     return spectra
+
+
+def name_spectrum(loc):
+    precision = 1000
+    glong = (loc.galactic.l.degree * precision // 1) / precision
+    glat = (loc.galactic.b.degree * precision // 1) / precision
+    return 'MAGMOHI G{:0=8.3f}{:=+07.3f}'.format(glong, glat)
 
 
 def read_field_stats():
@@ -221,7 +225,7 @@ def read_field_stats():
     return fields
 
 
-def extract_lv(spectra, field_map, min_rating='C'):
+def extract_lv(spectra, min_rating='C'):
     x = []
     y = []
     c = []
@@ -233,19 +237,13 @@ def extract_lv(spectra, field_map, min_rating='C'):
 
     for spectrum in spectra:
         opacities = spectrum.opacities
-        spectrum.duplicate = False
         if spectrum.rating > min_rating:
             bad_spectra += 1
             spectrum.low_sn = True
             continue
-        if field_map[spectrum.get_field_id()].duplicate:
+        if spectrum.duplicate:
             duplicate_spectra += 1
-            spectrum.duplicate = True
             continue
-        #if np.max(opacities) > max_opacity or np.min(opacities) < min_opacity:
-        #    bad_spectra += 1
-        #   spectrum.low_sn = True
-        #    continue
         y = np.concatenate((y, spectrum.velocity))
         c = np.concatenate((c, opacities))
         x = np.concatenate((x, np.full(len(opacities), spectrum.longitude)))
@@ -255,8 +253,9 @@ def extract_lv(spectra, field_map, min_rating='C'):
             used_fields.append(field_id)
             num_fields += 1
 
-    print("In %d fields read %d spectra of which %d had reasonable S/N and %d were duplicates " % (
-        num_fields, len(spectra), len(spectra) - bad_spectra, duplicate_spectra))
+    print("In %d fields read %d spectra of which %d had reasonable S/N and %d were duplicates, leaving %d to plot. " % (
+        num_fields, len(spectra), len(spectra) - bad_spectra, duplicate_spectra,
+        len(spectra) - bad_spectra - duplicate_spectra))
 
     return x, y, c, used_fields
 
@@ -488,11 +487,10 @@ def is_resolved(day, field_name, island_id, source_id, beam_area, islands):
     :param island_id: The id of the source island
     :param source_id: The component id within the island
     :param beam_area: The area of the beam in steradians
-    :param sources: The table of all sources
     :return: True if the source is resolved, False otherwise.
     """
     for isle in islands:
-        print (isle['Day'], day, isle['Field'], field_name, isle['island'], island_id)
+        #print (isle['Day'], day, isle['Field'], field_name, isle['island'], island_id)
         if isle['Day'] == day and isle['Field'] == field_name and isle['island'] == int(island_id):
             #src_area = math.radians(src['a']/3600.0) * math.radians(src['b']/3600.0)
             print ("island %s %s %s is %f as compared to beam of %f" % (day, field_name, island_id,  isle['area'], isle['beam_area']))
@@ -575,7 +573,7 @@ def output_spectra_catalogue(spectra, isle_day_map):
          max_opacity, rms_opacity, min_velocity, max_velocity, used,
          opacity_range, max_s_max_n, continuum_sd, max_em_std, rating, resolved, duplicate,
          filenames, local_paths, local_emission_paths],
-        names=['Source_Id', 'Day', 'Field', 'Source', 'Longitude', 'Latitude', 'RA', 'Dec', 'Max_Flux',
+        names=['Name', 'Day', 'Field', 'Source', 'Longitude', 'Latitude', 'RA', 'Dec', 'Max_Flux',
                'Min_Opacity', 'Max_Opacity', 'RMS_Opacity', 'Min_Velocity',
                'Max_Velocity', 'Used', 'Opacity_Range', 'Max_S_Max_N',
                'Continuum_SD', 'max_em_std', 'Rating', 'Resolved', 'Duplicate',
@@ -783,6 +781,10 @@ def plot_spectra(spectra):
             # skip entries which have no emission data
             continue
 
+        if spectrum.duplicate:
+            # Skip duplicates
+            continue
+
         # Plot line chart of bright_temp vs opacity according in velocity order
         fig = plt.figure(0, [6, 9])
 
@@ -797,7 +799,8 @@ def plot_spectra(spectra):
         #ax.set_xlabel(r'Velocity relative to LSR (km/s)')
         ax.set_ylabel(r'$T_B (K)$')
         ax.grid(True)
-        ax.set_title(spectrum.field_name + " src " + spectrum.src_id + " on day " + spectrum.day + "(" + spectrum.rating + ")")
+        ax.set_title(spectrum.name + " (" + spectrum.rating + ")\n" + spectrum.field_name + " src " + spectrum.src_id +
+                     " on day " + spectrum.day)
         plt.setp(ax.get_xticklabels(), visible=False)
 
         # 2. absorption
@@ -826,9 +829,56 @@ def plot_spectra(spectra):
         #ax2.set_position(pos2)
 
         # Write out to plots/field-day-src.pdf
-        filename = spectrum.field_name + "_" + spectrum.day + "_src" + spectrum.src_id + ".pdf"
+        filename = spectrum.name + ".pdf"
         plt.savefig("plots/" + spectrum.rating + "/" + filename)
         plt.close()
+
+
+def filter_duplicate_sources(spectra, field_map):
+    duplicate_radius = 4 * u.arcsec
+    print ('## Identifying duplicate sources (reobserved fields or within {} arcsec'.format(duplicate_radius))
+
+    spectra_array = np.array(spectra)
+    l = []
+    b = []
+    duplicate_spectra = 0
+    for spectrum in spectra_array:
+        l.append(spectrum.loc.galactic.l.degree)
+        b.append(spectrum.loc.galactic.b.degree)
+        # Flag spectra from duplicate fields
+        spectrum.duplicate = False
+        if field_map[spectrum.get_field_id()].duplicate:
+            duplicate_spectra += 1
+            spectrum.duplicate = True
+    num_spectra_dupe_fields = duplicate_spectra
+
+    magmo_coords = SkyCoord(l, b, frame='galactic', unit="deg")
+
+    idx_match1, idx_match2, dist_2d, dist_3d = magmo_coords.search_around_sky(magmo_coords, duplicate_radius)
+    for i in range(len(idx_match1)):
+        match1 = spectra_array[idx_match1[i]]
+        match2 = spectra_array[idx_match2[i]]
+        if not match1.duplicate and not match2.duplicate and match1 != match2:
+            #print("{} is only {:.2f} arcsec from {} Rating {} v {} ContSD {:.3f} v {:.3f}".format(match1.name,
+            #                                                                                  dist_2d[i].to(u.arcsec),
+            #                                                                          match2.name, match1.rating,
+            #                                                                          match2.rating,
+            #                                                                          match1.continuum_sd,
+            #                                                                          match2.continuum_sd))
+            if match1.rating > match2.rating or match1.continuum_sd > match2.continuum_sd:
+                match1.duplicate = True
+                print("Flagging {} rating {} as duplicate. Dist {:.2f}".format(match1.name, match1.rating,
+                                                                           dist_2d[i].to(u.arcsec)))
+            else:
+                match2.duplicate = True
+                print("Flagging {} rating {} as duplicate. Dist {:.2f}".format(match2.name, match2.rating,
+                                                                           dist_2d[i].to(u.arcsec)))
+            duplicate_spectra += 1
+    print(
+        "Flagged {} spectra out of {} as duplicates. {} based on field, {} based on distance".format(duplicate_spectra,
+                                                                                                     len(spectra),
+                                                                                                     num_spectra_dupe_fields,
+                                                                                                     duplicate_spectra - num_spectra_dupe_fields))
 
 
 def main():
@@ -852,12 +902,14 @@ def main():
 
     # Process Spectra
     spectra = read_spectra()
-    x, y, c, used_fields = extract_lv(spectra, field_map)
+    filter_duplicate_sources(spectra, field_map)
+    x, y, c, used_fields = extract_lv(spectra)
     continuum_ranges = magmo.get_continuum_ranges()
     plot_lv(x, y, c, 'magmo-lv.pdf', continuum_ranges, False)
     plot_lv(x, y, c, 'magmo-lv-zoom.pdf', continuum_ranges, True)
     plot_lv_image(x, y, c, 'magmo-lv-zoom-im.pdf')
     output_spectra_catalogue(spectra, isle_day_map)
+
 
     # calculate single phase spin temp for A-C
     #output_single_phase_catalogue(spectra)
@@ -865,7 +917,7 @@ def main():
     plot_spectra(spectra)
 
     # Output only the really good spectra
-    x, y, c, temp = extract_lv(spectra, field_map, min_rating='B')
+    x, y, c, temp = extract_lv(spectra, min_rating='B')
     plot_lv(x, y, c, 'magmo-lv_AB.pdf', continuum_ranges, False)
     plot_lv_image(x, y, c, 'magmo-lv-zoom-im_AB.pdf')
 

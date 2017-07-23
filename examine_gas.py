@@ -16,7 +16,7 @@ import re
 from string import Template
 import time
 
-from astropy.coordinates import SkyCoord
+from astropy.coordinates import SkyCoord, matching
 from astropy.io.votable import parse, from_table, writeto
 from astropy.table import Table, Column, hstack
 from astropy.io import ascii
@@ -143,7 +143,8 @@ def analyse_components(components, spectra_map, mmb_map):
             gas.tau = -1 * np.log(np.maximum(optical_depth, 1e-16))
             gas.t_off = None
             gas.t_s = None
-            gas.name = component['Source_Id']
+            gas.name = component['Comp_Name']
+            gas.spectra_name = component['Spectra_Name']
 
             spectrum = spectra_map[get_spectra_key(component['Day'], component['Field'], component['Source'])]
             gas.rating = spectrum['Rating']
@@ -177,8 +178,8 @@ def analyse_components(components, spectra_map, mmb_map):
                 gas.t_off = t_off
                 gas.t_s = t_s
                 # component['t_s '] = t_s
-                print("src %s at velocity %.4f has t_s %.3f (%.3f/%.3f)" % (
-                component['Field'], comp_vel, t_s, t_off, comp_amp))
+                print("Component %s at velocity %.4f has t_s %.3f (%.3f/%.3f)" % (
+                    gas.name, comp_vel, t_s, t_off, comp_amp))
     return all_gas
 
 
@@ -258,7 +259,7 @@ def output_gas_catalogue(all_gas):
         [names, days, field_names, sources, velocities, em_velocities, optical_depths, temps_off, temps_spin,
          longitudes, latitudes, ras, decs, comp_widths, vel_diff, equiv_width, tau, maser_region,
          filenames, local_paths, local_emission_paths, local_spectra_paths],
-        names=['Source_Id', 'Day', 'Field', 'Source', 'Velocity', 'em_velocity', 'Optical_Depth', 'temp_off',
+        names=['Comp_Name', 'Day', 'Field', 'Source', 'Velocity', 'em_velocity', 'Optical_Depth', 'temp_off',
                'temp_spin', 'longitude', 'latitude', 'ra', 'dec', 'fwhm', 'vel_diff', 'equiv_width', 'tau',
                'near_maser', 'Filename', 'Local_Path', 'Local_Emission_Path', 'Local_Spectrum_Path'],
         meta={'ID': 'magmo_gas',
@@ -552,8 +553,26 @@ def compare_dickey_2003(magmo_coords, magmo_table):
     combined = hstack([t1, t2], join_type='exact')
     dist_col = Column(name='Separation', data=matches[:, 2], unit=u.degree)
     combined.add_column(dist_col)
-    combined.sort('Name')
+    combined.sort('Name_1')
     combined.write('dm-combined.vot', format='votable', overwrite=True)
+
+
+def report_close_neighbours(magmo_coords, magmo_table):
+    idx, sep2d, dist3d = matching.match_coordinates_sky(magmo_coords, magmo_coords, 2)
+    idx_orig = np.arange(len(magmo_coords))
+    idx_close = sep2d < 3 * u.arcsec
+    idx_match1 = idx_orig[idx_close]
+    idx_match2 = idx[idx_close]
+    sep_12 = sep2d[idx_close]
+    for i in range(len(idx_match1)):
+        match1 = magmo_table[idx_match1[i]]
+        match2 = magmo_table[idx_match2[i]]
+        print("{} is only {:.2f} arcsec from {} Rating {} v {} ContSD {:.3f} v {:.3f}".format(match1['Name'],
+                                                                                      sep_12[i].to(u.arcsec),
+                                                                                      match2['Name'], match1['Rating'],
+                                                                                      match2['Rating'],
+                                                                                      match1['Continuum_SD'],
+                                                                                      match2['Continuum_SD']))
 
 
 def main():
@@ -585,6 +604,7 @@ def main():
     magmo_coords, magmo_table = get_magmo_table()
     num_matches_brown = compare_brown_2014(magmo_coords, magmo_table)
     compare_dickey_2003(magmo_coords, magmo_table)
+    report_close_neighbours(magmo_coords, magmo_table)
 
     # Report
     end = time.time()

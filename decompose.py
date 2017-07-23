@@ -128,7 +128,7 @@ def prepare_spectra(spectra, data_filename):
         longitude = spectrum['Longitude']
         if longitude < 0:
             longitude += 360
-        print (i, spectrum['Rating'], spectrum['Day'], longitude, spectrum['Field'], spectrum['Source'])
+        # print (i, spectrum['Rating'], spectrum['Day'], longitude, spectrum['Field'], spectrum['Source'])
         rms = spectrum['Continuum_SD']
 
         errors = np.ones(opacity.shape[0]) * rms
@@ -191,6 +191,7 @@ def decompose(spectra, out_filename, alpha1, alpha2, snr_thresh, data_filename):
 
 def output_component_catalogue(spectra, data, data_decomposed):
     names = []
+    comp_names = []
     days = []
     field_names = []
     sources = []
@@ -238,16 +239,18 @@ def output_component_catalogue(spectra, data, data_decomposed):
                 amps_fit_errs.append(means_fit_err[j])
                 fwhms_fit_errs.append(fwhms_fit_err[j])
                 means_fit_errs.append(amplitudes_fit_err[j])
-                names.append(spectrum['Source_Id'])
+                names.append(spectrum['Name'])
+                suffix = chr(ord('A') + j)
+                comp_names.append(spectrum['Name']+suffix)
         else:
             rating = spectrum['Rating']
             num_no_comps[rating] = num_no_comps.get(rating, 0) + 1
 
     temp_table = Table(
-        [names, days, field_names, sources, longitudes, latitudes, amps, fwhms, means, best_fit_rchi2s, amps_fit_errs,
-         fwhms_fit_errs, means_fit_errs],
-        names=['Source_Id', 'Day', 'Field', 'Source', 'Longitude', 'Latitude', 'Amplitude', 'FWHM', 'Mean', 'Best Fit Rchi2',
-               'Amplitude Fit Err', 'FWHM Fit Err', 'Mean Fit Err'],
+        [comp_names, names, days, field_names, sources, longitudes, latitudes, amps, fwhms, means, best_fit_rchi2s,
+         amps_fit_errs, fwhms_fit_errs, means_fit_errs],
+        names=['Comp_Name', 'Spectra_Name', 'Day', 'Field', 'Source', 'Longitude', 'Latitude', 'Amplitude', 'FWHM',
+               'Mean', 'Best_Fit_Rchi2', 'Amplitude_Fit_Err', 'FWHM_Fit_Err', 'Mean_Fit_Err'],
         meta={'ID': 'magmo_components',
               'name': 'MAGMO Components ' + str(datetime.date.today())})
     votable = from_table(temp_table)
@@ -291,7 +294,7 @@ def output_decomposition_catalogue(folder, spectra, data, data_decomposed):
     for i in range(len(data_decomposed['fwhms_fit'])):
         spectrum = spectra[data['spectrum_idx'][i]]
 
-        names.append(spectrum['Source_Id'])
+        names.append(spectrum['Name'])
         days.append(int(spectrum['Day']))
         field_names.append(spectrum['Field'])
         sources.append(spectrum['Source'])
@@ -312,7 +315,7 @@ def output_decomposition_catalogue(folder, spectra, data, data_decomposed):
 
     temp_table = Table(
         [names, days, field_names, sources, longitudes, latitudes, residual_rms, ratings, num_comps, cont_sd],
-        names=['Source_Id', 'Day', 'Field', 'Source', 'Longitude', 'Latitude', 'Residual_RMS', 'Rating', 'Num_Comp',
+        names=['Spectra_Name', 'Day', 'Field', 'Source', 'Longitude', 'Latitude', 'Residual_RMS', 'Rating', 'Num_Comp',
                'Continuum_SD'],
         meta={'ID': 'magmo_decomposition',
               'name': 'MAGMO Decomposition ' + str(datetime.date.today())})
@@ -380,7 +383,7 @@ def plot_spectra(spectra, data, data_decomposed, alpha1, alpha2, folder='.'):
         field_name = spectrum['Field']
         day = str(spectrum['Day'])
         src_id = spectrum['Source']
-        name = field_name + " src " + src_id + " on day " + day + "(" + rating + ")"
+        name = spectrum['Name'] + " (" + rating + ")"
         filename = plot_folder + "/" + rating + "/"
         filename += field_name + "_" + day + "_src" + src_id + "_fit"
         residuals[i] = plot_spectrum(velo, opacity, fit_amps, fit_fwhms, fit_means, name, filename, ('pdf', 'png'))
@@ -436,18 +439,15 @@ def output_decomposition(spectra, out_filename, folder, data_filename, alpha1, a
         x = data['x_values'][index]
         #y = 1 - data['data_list'][index]
         #y = convert_to_ratio(data['data_list'][index])
-        y = data['data_list'][index]
+        y = convert_from_ratio(data['data_list'][index])
         fit_fwhms = data_decomposed['fwhms_fit'][index]
         fit_means = data_decomposed['means_fit'][index]
         fit_amps = data_decomposed['amplitudes_fit'][index]
 
         spectrum = spectra[data['spectrum_idx'][index]]
         rating = spectrum['Rating']
-        field_name = spectrum['Field']
-        day = str(spectrum['Day'])
-        src_id = spectrum['Source']
 
-        name = field_name + " src " + src_id + " d " + day + "(" + rating + ")"
+        name = spectrum['Name'] + " (" + rating + ")"
 
         residual = plot_single_spectrum(ax, x, y, fit_amps, fit_fwhms, fit_means, name)
         residual_rms = np.sqrt(np.mean(np.square(residual)))
