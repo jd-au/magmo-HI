@@ -667,7 +667,8 @@ def calc_sigma_tau(cont_sd, em_mean, opacity):
     """
     tsys = 44.7
     if len(em_mean) > 0:
-        sigma_tau = cont_sd * ((tsys + em_mean) / tsys)
+        floor = np.zeros(em_mean.shape)
+        sigma_tau = cont_sd * ((tsys + np.fmax(floor, em_mean)) / tsys)
     else:
         sigma_tau = np.full(opacity.shape, cont_sd)
     return sigma_tau
