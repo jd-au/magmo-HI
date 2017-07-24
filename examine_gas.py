@@ -254,14 +254,15 @@ def output_gas_catalogue(all_gas):
     # bulk calc fields
     vel_diff = np.abs(velocities - em_velocities)
     equiv_width = np.abs((1 - optical_depths) * comp_widths)
+    column_density = equiv_width * temps_spin * 1.8E18
 
     temp_table = Table(
         [names, days, field_names, sources, velocities, em_velocities, optical_depths, temps_off, temps_spin,
-         longitudes, latitudes, ras, decs, comp_widths, vel_diff, equiv_width, tau, maser_region,
+         longitudes, latitudes, ras, decs, comp_widths, vel_diff, equiv_width, tau, maser_region, column_density,
          filenames, local_paths, local_emission_paths, local_spectra_paths],
         names=['Comp_Name', 'Day', 'Field', 'Source', 'Velocity', 'em_velocity', 'Optical_Depth', 'temp_off',
                'temp_spin', 'longitude', 'latitude', 'ra', 'dec', 'fwhm', 'vel_diff', 'equiv_width', 'tau',
-               'near_maser', 'Filename', 'Local_Path', 'Local_Emission_Path', 'Local_Spectrum_Path'],
+               'near_maser', 'Column_density', 'Filename', 'Local_Path', 'Local_Emission_Path', 'Local_Spectrum_Path'],
         meta={'ID': 'magmo_gas',
               'name': 'MAGMO Gas ' + str(datetime.date.today())})
     votable = from_table(temp_table)
@@ -385,7 +386,7 @@ def get_brown_graph_filename(lat, lon):
     return filename
 
 
-def resample(values, old_grid, other_grid):
+def resample(values, old_grid, other_grid, fill_value=1.0):
     """ resample values from the old_grid to match the new_grid, with linear interpolation """
 
     old_step = old_grid[1] - old_grid[0]
@@ -401,9 +402,9 @@ def resample(values, old_grid, other_grid):
     if old_grid[0] > other_grid[0]:
         start = np.searchsorted(other_grid, old_grid[0]) - 1
 
-    f = interpolate.interp1d(old_grid, values, fill_value=1.0, bounds_error=False)
+    f = interpolate.interp1d(old_grid, values, fill_value=fill_value, bounds_error=False)
     resampled = f(other_grid[start:int(start + num_steps)])
-    padded = np.ones(len(other_grid))
+    padded = np.full(other_grid.shape, fill_value)
     padded[start:start + len(resampled)] = resampled
     return padded
 
@@ -432,7 +433,7 @@ def plot_spectrum(x, y, ax, title, line=True, **kwargs):
     return
 
 
-def plot_source(title1, title2, brown_data, resampled_spec, cont_sd, filename):
+def plot_source(title1, title2, brown_data, resampled_spec, resampled_sigma, filename):
     """
     Produce a plot of the two spectra (left) and the residual (right) and output it to a file.
     :param title1:  The first line of the title of the left panel.
@@ -447,28 +448,29 @@ def plot_source(title1, title2, brown_data, resampled_spec, cont_sd, filename):
     fig = plt.figure(figsize=(8.27, 3.8))
     ax = fig.add_subplot(1, 2, 1)
     title = title1 + '\n' + title2
-    plot_spectrum(brown_data['col1'] * 1000, resampled_spec, ax, title, color='mediumturquoise')
-    plot_spectrum(brown_data['col1'] * 1000, brown_data['col5'], ax, title, line=False, color='blue')
+    velocity = brown_data['col1'] * 1000
+    plot_spectrum(velocity, resampled_spec, ax, title, color='mediumturquoise')
+    plot_spectrum(velocity, brown_data['col5'], ax, title, line=False, color='blue')
 
     # Plot Residual
     ax = fig.add_subplot(1, 2, 2)
-    plot_spectrum(brown_data['col1'] * 1000, resampled_spec - brown_data['col5'], ax,
+    plot_spectrum(velocity, resampled_spec - brown_data['col5'], ax,
                   'Difference between MAGMO and SGPS', line=False, color='gray')
     ax.set_ylim([-1.5, 1.5])
-    ax.axhline(cont_sd * 4, color='lightsteelblue', linestyle='dashed')
-    ax.axhline(cont_sd * -4, color='lightsteelblue', linestyle='dashed')
+    plot_spectrum(velocity, (resampled_sigma * 3), ax, '', line=False, color='lightsteelblue', linewidth=1)
+    plot_spectrum(velocity, -(resampled_sigma * 3), ax, '', line=False, color='lightsteelblue', linewidth=1)
     fig.tight_layout()
     fig.savefig(filename, bbox_inches="tight")
     plt.close()
     return
 
 
-def assess_match(brown_data, resampled_spec, cont_sd):
-    noise_threshold = 4*cont_sd
+def assess_match(brown_data, resampled_spec, resampled_sigma):
+    noise_threshold = 3*resampled_sigma
     residual = resampled_spec - brown_data['col5']
     abs_residual = np.abs(residual)
     noisy = residual[abs_residual > noise_threshold]
-    #print ("Found {} out {} outside noise threshold {}".format(len(noisy), len(residual), noise_threshold))
+    print ("Found {} out {} outside noise threshold.".format(len(noisy), len(residual)))
     return len(noisy)
 
 
@@ -509,14 +511,18 @@ def compare_brown_2014(magmo_coords, magmo_table):
             spectrum = read_votable_results(
                 get_opacity_filename(match_row['Day'], match_row['Field'], match_row['Source']))
             resampled_spec = resample(spectrum['opacity'], spectrum['velocity'], brown_data['col1'] * 1000)
-            cont_sd = match_row['Continuum_SD']
 
-            match_row['Noisy_Count'] = assess_match(brown_data, resampled_spec, cont_sd)
+            cont_sd = match_row['Continuum_SD']
+            resampled_sigma = resample(spectrum['sigma_tau'], spectrum['velocity'], brown_data['col1'] * 1000,
+                                       fill_value=cont_sd)
+
+            match_row['Noisy_Count'] = assess_match(brown_data, resampled_spec, resampled_sigma)
 
             title1 = match_row['SIMBAD']
-            title2 = 'Day {} Field {} Src {}'.format(match_row['Day'], match_row['Field'], match_row['Source'])
+            #title2 = 'Day {} Field {} Src {}'.format(match_row['Day'], match_row['Field'], match_row['Source'])
+            title2 = match_row['Name']
             filename = get_brown_graph_filename(match_row['GLON'], match_row['GLAT'])
-            plot_source(title1, title2, brown_data, resampled_spec, cont_sd, filename)
+            plot_source(title1, title2, brown_data, resampled_spec, resampled_sigma, filename)
             latex_doc.write('\n\\begin{figure}[ht]\n')
             latex_doc.write('\\includegraphics[scale=0.75]{' + filename + '}\n')
             latex_doc.write(
