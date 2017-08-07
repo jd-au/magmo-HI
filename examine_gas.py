@@ -10,7 +10,9 @@
 from __future__ import print_function, division
 
 import argparse
+import csv
 import datetime
+import math
 import os
 import re
 from string import Template
@@ -45,6 +47,8 @@ def parseargs():
         description="Examine the HI gas represented by each Gaussian component")
 
     parser.add_argument("--compare_only", help="Only run the comparison steps", default=False,
+                        action='store_true')
+    parser.add_argument("--no_compare", help="Only run the analysis steps", default=False,
                         action='store_true')
 
     args = parser.parse_args()
@@ -130,17 +134,18 @@ def analyse_components(components, spectra_map, mmb_map):
             comp_width = component['FWHM']
             comp_amp = component['Amplitude']
             t_off, em_vel = get_temp(emission, comp_vel * 1000)
-            optical_depth = 1 - comp_amp
+            optical_depth = 1 - comp_amp  # From 1-e^-tau to e^-tau
 
             gas = Gas(component['Day'], component['Field'], component['Source'])
             gas.comp_vel = comp_vel
-            gas.comp_amp = comp_amp
-            gas.comp_width = comp_width
+            gas.comp_width = math.fabs(comp_width)
             gas.optical_depth = optical_depth
             gas.em_vel = em_vel
             gas.longitude = component['Longitude']
             gas.latitude = component['Latitude']
             gas.tau = -1 * np.log(np.maximum(optical_depth, 1e-16))
+            gas.t_kmax = 21.866 * comp_width**2
+            print ("Gas T_kmax=", gas.t_kmax, "comp_width=", comp_width)
             gas.t_off = None
             gas.t_s = None
             gas.name = component['Comp_Name']
@@ -170,9 +175,10 @@ def analyse_components(components, spectra_map, mmb_map):
 
             all_gas.append(gas)
 
-            if t_off > 0 and comp_amp > 0.02:
+            if t_off > 0 and optical_depth < 0.9:
                 # Calculate spin temperature and column density
-                t_s = t_off / comp_amp
+                #denominator = math.min(1-comp_amp)
+                t_s = t_off / (1-np.exp(-gas.tau)) # (tb / (1-e^-tau)
 
                 # Record
                 gas.t_off = t_off
@@ -191,6 +197,15 @@ def is_gas_near_maser(gas):
     return gas.maser_vel_low - 10 <= gas.comp_vel <= gas.maser_vel_high + 10
 
 
+def set_field_metadata(field, ucd, unit, description):
+    if ucd:
+        field.ucd = ucd
+    if unit:
+        field.unit = unit
+    if description:
+        field.description = description
+
+
 def output_gas_catalogue(all_gas):
     num_gas = len(all_gas)
     names = []
@@ -207,8 +222,10 @@ def output_gas_catalogue(all_gas):
     comp_widths = np.zeros(num_gas)
     temps_off = np.ma.array(np.zeros(num_gas))
     temps_spin = np.ma.array(np.zeros(num_gas))
+    temps_kmax = np.zeros(num_gas)
     tau = np.zeros(num_gas)
     maser_region = np.empty(num_gas, dtype=bool)
+    ratings = np.empty(num_gas, dtype=object)
     filenames = np.empty(num_gas, dtype=object)
     local_paths = np.empty(num_gas, dtype=object)
     local_emission_paths = np.empty(num_gas, dtype=object)
@@ -228,8 +245,9 @@ def output_gas_catalogue(all_gas):
         decs.append(gas.dec)
         velocities[i] = gas.comp_vel
         em_velocities[i] = gas.em_vel / 1000
-        optical_depths[i] = gas.comp_amp
+        optical_depths[i] = gas.optical_depth
         comp_widths[i] = gas.comp_width
+        temps_kmax[i] = gas.t_kmax
         if gas.t_off is None:
             temps_off[i] = np.ma.masked
         else:
@@ -240,35 +258,54 @@ def output_gas_catalogue(all_gas):
             temps_spin[i] = gas.t_s
         tau[i] = gas.tau
         maser_region[i] = is_gas_near_maser(gas)
+        ratings[i] = gas.rating
         # Need to read in spectra to get rating and include it in the catalogue and
         # link to the fit preview: e.g. plots/A/012.909-0.260_19_src4-1_fit
         prefix = 'day' + str(gas.day) + '/' + gas.field + \
                  "_src" + gas.src
         filenames[i] = prefix + "_plot.png"
         em_filename = prefix + "_emission.png"
-        spectra_path = 'plots/{}/{}_{}_src{}_fit.png'.format(gas.rating, gas.field, gas.day, gas.src)
+        spectra_path = 'run2/plots/{}/{}_{}_src{}_fit.png'.format(gas.rating, gas.field, gas.day, gas.src)
         local_paths[i] = base_path + '/' + filenames[i]
         local_emission_paths[i] = base_path + '/' + em_filename
         local_spectra_paths[i] = base_path + '/' + spectra_path
 
     # bulk calc fields
     vel_diff = np.abs(velocities - em_velocities)
-    equiv_width = np.abs((1 - optical_depths) * comp_widths)
-    column_density = equiv_width * temps_spin * 1.8E18
+    equiv_width = np.abs((optical_depths) * comp_widths)
+    #tau = -np.log(optical_depths)
+    column_density = tau * np.abs(comp_widths) * temps_spin * 1.83E18
+    fwhm = np.abs(comp_widths)
+    sigma = fwhm / (2 * math.sqrt(2 * math.log(2)))
 
     temp_table = Table(
-        [names, days, field_names, sources, velocities, em_velocities, optical_depths, temps_off, temps_spin,
-         longitudes, latitudes, ras, decs, comp_widths, vel_diff, equiv_width, tau, maser_region, column_density,
-         filenames, local_paths, local_emission_paths, local_spectra_paths],
-        names=['Comp_Name', 'Day', 'Field', 'Source', 'Velocity', 'em_velocity', 'Optical_Depth', 'temp_off',
-               'temp_spin', 'longitude', 'latitude', 'ra', 'dec', 'fwhm', 'vel_diff', 'equiv_width', 'tau',
-               'near_maser', 'Column_density', 'Filename', 'Local_Path', 'Local_Emission_Path', 'Local_Spectrum_Path'],
+        [names, days, field_names, sources, velocities, em_velocities, optical_depths, temps_off, temps_spin, temps_kmax,
+         longitudes, latitudes, ras, decs, fwhm, sigma, vel_diff, equiv_width, tau, maser_region, column_density,
+         ratings, filenames, local_paths, local_emission_paths, local_spectra_paths],
+        names=['Comp_Name', 'Day', 'Field', 'Source', 'Velocity', 'em_velocity', 'optical_depth', 'temp_off',
+               'temp_spin', 'temp_kmax', 'longitude', 'latitude', 'ra', 'dec', 'fwhm', 'sigma', 'vel_diff', 'equiv_width', 'tau',
+               'near_maser', 'column_density', 'Rating', 'Filename', 'Local_Path', 'Local_Emission_Path',
+               'Local_Spectrum_Path'],
         meta={'ID': 'magmo_gas',
               'name': 'MAGMO Gas ' + str(datetime.date.today())})
     votable = from_table(temp_table)
     table = votable.get_first_table()
-    table.get_field_by_id('ra').ucd = 'pos.eq.ra;meta.main'
-    table.get_field_by_id('dec').ucd = 'pos.eq.dec;meta.main'
+    set_field_metadata(table.get_field_by_id('longitude'), 'pos.galactic.long', 'deg',
+                       'Galactic longitude of the background source')
+    set_field_metadata(table.get_field_by_id('latitude'), 'pos.galactic.lat', 'deg',
+                       'Galactic latitude of the background source')
+    set_field_metadata(table.get_field_by_id('ra'), 'pos.eq.ra;meta.main', 'deg',
+                       'Right ascension of the background source (J2000)')
+    set_field_metadata(table.get_field_by_id('dec'), 'pos.eq.dec;meta.main', 'deg',
+                       'Declination of the background source (J2000)')
+    set_field_metadata(table.get_field_by_id('fwhm'), '', 'km/s', 'Full width at half maximum of the Gaussian component')
+    set_field_metadata(table.get_field_by_id('sigma'), '', 'km/s', 'Sigma value of the Gaussian component')
+    set_field_metadata(table.get_field_by_id('temp_off'), 'phys.temperature;stat.mean', 'K',
+                       'The mean temperature for the gas immediately adjacent to the source')
+    set_field_metadata(table.get_field_by_id('temp_spin'), 'phys.temperature;stat.mean', 'K',
+                       'The excitation or spin temperature of the gas')
+    set_field_metadata(table.get_field_by_id('optical_depth'), '', '',
+                       'The peak optical depth of the component ($e^(-\\tau)$)')
     filename = "magmo-gas.vot"
     writeto(votable, filename)
     return table
@@ -291,6 +328,7 @@ def plot_equiv_width_lv(gas_table):
     filename = 'magmo-equiv-width-lv.pdf'
     # plt.show()
     plt.savefig(filename)
+    plt.close()
     return None
 
 
@@ -301,15 +339,16 @@ def plot_maser_comparison(gas_table):
     gas_array = gas_table.array
     df = gas_table.to_table().to_pandas()
     grid = sns.FacetGrid(df, col="near_maser", margin_titles=True, sharey=False)
-    bins = np.logspace(0.01, 3.1, 21)
+    bins = np.logspace(0.01, 3, 21)
     grid.map(plt.hist, "temp_spin", color="steelblue", lw=0, bins=bins)
     plt.savefig('near_maser_temp.pdf')
+    plt.close()
 
     ts = gas_array['temp_spin']
     indexes = [~np.isnan(ts)]
     ts_gas = gas_array[indexes]
 
-    print(ts[0:10], ts_gas[0:10])
+    #print(ts[0:10], ts_gas[0:10])
     near_maser = ts_gas[ts_gas['near_maser']]
     away_maser = ts_gas[ts_gas['near_maser'] == False]
     print(near_maser[0:10], away_maser[0:10])
@@ -319,6 +358,69 @@ def plot_maser_comparison(gas_table):
                                                              np.std(away_maser['temp_spin'])))
     statistic, p_value = stats.ks_2samp(np.ma.filled(near_maser['temp_spin']), np.ma.filled(away_maser['temp_spin']))
     print ('Population similarity p_value={}'.format(p_value))
+
+
+def plot_single_hist(gas_array, field, min, max, label=None, sample=None):
+    if sample is None:
+        sample = gas_array[field]
+    hist, edges = np.histogram(sample, bins='auto', range=(min, max))
+    outliers = len(sample[sample > max])
+    hist[-1] += outliers
+    #print ("tau edges",edges)
+    plt.bar(edges[:-1], hist, width=edges[1])
+    plt.xlabel(label if label else field)
+    plt.ylabel('Number of components')
+    filename = 'magmo-hist-{}.pdf'.format(field)
+    plt.savefig(filename)
+    plt.close()
+    sample_no_outliers = sample[sample <= max]
+    print("{} had {} values, mean {:0.3f}, median {:0.3f}, sd {:0.3f} outliers {} > max {}".format(field, len(sample),
+                                                                                          np.mean(sample_no_outliers),
+                                                                                          np.median(sample_no_outliers),
+                                                                                          np.std(sample_no_outliers),
+                                                                                          outliers, max))
+
+
+def plot_histograms(gas_table):
+    gas_array = gas_table.array
+    plot_single_hist(gas_array, 'tau', 0, 8, label='$\\tau$')
+    plot_single_hist(gas_array, 'fwhm', 0, 60, label='FWHM (km/s)')
+    plot_single_hist(gas_array, 'equiv_width', 0, 60, label='Equivalent Width (km/s)')
+    plot_single_hist(gas_array, 'temp_spin', 0, 450, label='Spin Temperature (K)')
+
+    # Column density is special
+    sample = np.array(gas_array['column_density']) / 1e20
+    bins = 10 ** np.linspace(np.log10(np.min(sample)), np.log10(np.max(sample)), 50)
+    hist, edges = np.histogram(sample, bins=bins)
+    plt.bar(edges[:-1], hist, width=edges[1])
+    label = 'Column Density $N_{H20}$ (1E20 g/cm^3)'
+    plt.xlabel(label)
+    plt.ylabel('Number of components')
+    filename = 'magmo-hist-column_density.pdf'
+    plt.savefig(filename)
+    plt.close()
+    #sample_no_outliers = sample[sample <= max]
+    print("{} had {} values, mean {:0.3f}, median {:0.3f}, sd {:0.3f} outliers".format('column_density', len(sample),
+                                                                                          np.mean(sample),
+                                                                                          np.median(sample),
+                                                                                          np.std(sample))
+
+    #plot_single_hist(gas_array, 'column_density', 0, 1e34, label='Column Density $N_{H20}$ (1E20 g/cm^3)',
+                     )
+    #tau = gas_array['tau']
+    #hist, edges = np.histogram(tau, bins='fd', range=(0,8))
+    #outliers = len(tau[tau > 8])
+    #hist[-1] += outliers
+    #print ("tau edges",edges)
+    #plt.bar(edges[:-1], hist, width=edges[1]) # align='edge',
+    #plt.xlabel('$\\tau$')
+    #plt.ylabel('Number of components')
+    #filename = 'magmo-tau.pdf'
+    #plt.savefig(filename)
+    #plt.close()
+    #print("tau had {} values, mean {:0.3f}, median {:0.3f}, sd {:0.3f} outliers {}".format(len(tau), np.mean(tau),
+    #                                                                                       np.median(tau),
+    #                                                                                       np.std(tau), outliers))
 
 
 def find_best_matches(magmo_coords, other_coords, max_dist, magmo_table):
@@ -470,7 +572,7 @@ def assess_match(brown_data, resampled_spec, resampled_sigma):
     residual = resampled_spec - brown_data['col5']
     abs_residual = np.abs(residual)
     noisy = residual[abs_residual > noise_threshold]
-    print ("Found {} out {} outside noise threshold.".format(len(noisy), len(residual)))
+    #print ("Found {} out {} outside noise threshold.".format(len(noisy), len(residual)))
     return len(noisy)
 
 
@@ -533,7 +635,17 @@ def compare_brown_2014(magmo_coords, magmo_table):
 
     brown_table.write('sgps-hii.csv', format='csv', overwrite=True)
     combined.write('bm-combined.vot', format='votable', overwrite=True)
-    combined.write('bm-combined.csv', format='csv', overwrite=True)
+    #combined.write('bm-combined.csv', format='csv', overwrite=True)
+    with open('bm-combined.csv', "wb") as stats:
+        writer = csv.writer(stats) #, quoting=csv.QUOTE_NONNUMERIC)
+        writer.writerow(["SIMBAD", "MAGMO Name", "Separation", "Noise Count", "Qual", "Rating", "sigma_tau", "l", "b"])
+        for i in range(0, len(combined)):
+            writer.writerow(
+                [combined[i]['SIMBAD'], combined[i]['Name'], "{:0.0f}".format(combined[i]['Separation']*3600),
+                 "{:0.0f}".format(combined[i]['Noisy_Count']), combined[i]['Qual'], combined[i]['Rating'],
+                 "{:0.3f}".format(math.log(1 - combined[i]['Continuum_SD']) * -1),
+                 "{:0.4f}".format(combined[i]['GLON']), "{:0.4f}".format(combined[i]['GLAT'])])
+
     return len(matches)
 
 
@@ -605,12 +717,15 @@ def main():
 
         # Plots of MAGMO specific
         plot_maser_comparison(gas_table)
+        plot_histograms(gas_table)
 
     # Comparisons
-    magmo_coords, magmo_table = get_magmo_table()
-    num_matches_brown = compare_brown_2014(magmo_coords, magmo_table)
-    compare_dickey_2003(magmo_coords, magmo_table)
-    report_close_neighbours(magmo_coords, magmo_table)
+    num_matches_brown = 0
+    if not args.no_compare:
+        magmo_coords, magmo_table = get_magmo_table()
+        num_matches_brown = compare_brown_2014(magmo_coords, magmo_table)
+        compare_dickey_2003(magmo_coords, magmo_table)
+        report_close_neighbours(magmo_coords, magmo_table)
 
     # Report
     end = time.time()
