@@ -14,6 +14,7 @@ import os
 import sys
 import time
 import csv
+from string import Template
 
 from astropy.io import fits
 from astropy.io import votable
@@ -27,8 +28,8 @@ import matplotlib.pyplot as plt
 import math
 import numpy as np
 import numpy.core.records as rec
+from scipy.signal import savgol_filter
 
-from string import Template
 
 
 sn_min = 1.3
@@ -586,7 +587,7 @@ def point_in_island(point, islands):
     return False
 
 
-def calc_offset_points(longitude, latitude, beam_size, a, b, pa, islands, num_points=6, max_dist=0.04):
+def calc_offset_points(longitude, latitude, beam_size, a, b, pa, islands, num_points=6, max_dist=0.108):
     spacing = 2.0 * math.pi / float(num_points)
     origin = SkyCoord(longitude, latitude, frame='galactic', unit="deg")
     pa_rad = math.radians(pa)
@@ -642,6 +643,7 @@ def get_emission_spectra(centre, velocities, file_list, filename_prefix, a, b, p
         em_mean = np.mean(all_em, axis=0)
         em_std_interp = np.interp(velocities, ems[0].velocity, em_std)
         em_mean_interp = np.interp(velocities, ems[0].velocity, em_mean)
+        em_mean_interp = savgol_filter(em_mean_interp, 9, 2)
 
         output_emission_spectra(filename,
                                 centre.galactic.l, centre.galactic.b,
