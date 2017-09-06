@@ -80,8 +80,15 @@ def read_opacity(filename):
 def filter_spectra(spectra, min_long, max_long, min_quality):
     filtered = spectra[spectra['Longitude'] >= min_long]
     filtered = filtered[filtered['Longitude'] <= max_long]
+    num_filterd_long = len(spectra) - len(filtered)
     filtered = filtered[filtered['Rating'] <= min_quality]
+    num_filtered_quality = len(spectra) - len(filtered) - num_filterd_long
     filtered = filtered[filtered['Duplicate'] == False]
+    num_filtered_dupe = len(spectra) - len(filtered) - num_filterd_long - num_filtered_quality
+    print("Filtered spectra from {} to {}, Longitude: {} Quality: {} Duplicates: {}".format(len(spectra), len(filtered),
+                                                                                            num_filterd_long,
+                                                                                            num_filtered_quality,
+                                                                                            num_filtered_dupe))
     return filtered
 
 
@@ -279,7 +286,7 @@ def calc_residual(velo, opacity, fit_amps, fit_fwhms, fit_means):
     return residual
 
 
-def output_decomposition_catalogue(folder, spectra, data, data_decomposed):
+def output_decomposition_catalogue(folder, spectra, data, data_decomposed, alpha1, alpha2):
     names = []
     days = []
     field_names = []
@@ -318,7 +325,9 @@ def output_decomposition_catalogue(folder, spectra, data, data_decomposed):
         names=['Spectra_Name', 'Day', 'Field', 'Source', 'Longitude', 'Latitude', 'Residual_RMS', 'Rating', 'Num_Comp',
                'Continuum_SD'],
         meta={'ID': 'magmo_decomposition',
-              'name': 'MAGMO Decomposition ' + str(datetime.date.today())})
+              'name': 'MAGMO Decomposition ' + str(datetime.date.today()),
+              'alpha1' : alpha1,
+              'alpha2' : alpha2})
     votable = from_table(temp_table)
     filename = folder + "/magmo-decomposition.vot"
     writeto(votable, filename)
@@ -450,8 +459,9 @@ def output_decomposition(spectra, out_filename, folder, data_filename, alpha1, a
         name = spectrum['Name'] + " (" + rating + ")"
 
         residual = plot_single_spectrum(ax, x, y, fit_amps, fit_fwhms, fit_means, name)
-        residual_rms = np.sqrt(np.mean(np.square(residual)))
-        print (name, "has residual RMS of", residual_rms)
+        residual_past_noise = np.maximum(np.absolute(residual) - spectrum['Continuum_SD'], np.zeros(residual.shape))
+        residual_rms = np.sqrt(np.mean(np.square(residual_past_noise)))
+        print (name, "has residual RMS (excluding noise) of", residual_rms)
 
         if i % 3 == 0:
             ax.set_ylabel('$1 - e^{-\\tau}$')
@@ -460,6 +470,7 @@ def output_decomposition(spectra, out_filename, folder, data_filename, alpha1, a
         ax = fig.add_subplot(4, 3, i + 4 + ((i // 3) * 3))
         # frame2 = ax.add_axes((.1, .1, .8, .2))
         ax.plot(x, residual, 'or', markerfacecolor='None', markersize=2, markeredgecolor='blue')
+        ax.plot(x, residual_past_noise, 'or', markerfacecolor='None', markersize=2, markeredgecolor='green')
         ax.grid()
 
         # ax.set_xlim(400, 600)
@@ -473,7 +484,7 @@ def output_decomposition(spectra, out_filename, folder, data_filename, alpha1, a
     plt.close()
 
     output_component_catalogue(spectra, data, data_decomposed)
-    output_decomposition_catalogue(folder, spectra, data, data_decomposed)
+    output_decomposition_catalogue(folder, spectra, data, data_decomposed, alpha1, alpha2)
     plot_spectra(spectra, data, data_decomposed, alpha1, alpha2, folder=folder)
 
 
@@ -489,8 +500,8 @@ def main():
     spectra = read_spectra(args.input)
     spectra = filter_spectra(spectra, args.long_min, args.long_max, args.quality)
 
-    alpha1_range = (3, 4.36)
-    alpha2_range = (7, 9.37)
+    alpha1_range = (3.5, 4.36)
+    alpha2_range = (4.36, 9.37)
 
     #for i in range(0,1):  #len(alpha1_range)):
     for i in range(len(alpha1_range)):
