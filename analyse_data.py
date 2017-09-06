@@ -599,7 +599,7 @@ def calc_offset_points(longitude, latitude, beam_size, a, b, pa, islands, num_po
         while inside_component:
             if mult*beam_size > max_dist:
                 coord = None
-                break;
+                break
             g_l = longitude + math.sin(angle)*beam_size*mult
             g_b = latitude + math.cos(angle)*beam_size*mult
             coord = SkyCoord(g_l, g_b, frame='galactic', unit="deg")

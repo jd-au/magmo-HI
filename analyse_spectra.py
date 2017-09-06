@@ -135,12 +135,15 @@ def read_spectra():
             fluxes = np.zeros(len(results_array))
             em_temps = np.zeros(len(results_array))
             em_std = np.zeros(len(results_array))
+            sigma_tau = np.zeros(len(results_array))
             i = 0
             for row in results_array:
                 opacity = row['opacity']
                 velocities[i] = row['velocity'] / 1000.0
                 opacities[i] = opacity
                 fluxes[i] = row['flux']
+                if 'sigma_tau' in results_array.dtype.names:
+                    sigma_tau[i] = row['sigma_tau']
                 if 'em_mean' in results_array.dtype.names:
                     em_temps[i] = row['em_mean']
                 if 'em_std' in results_array.dtype.names:
@@ -151,6 +154,7 @@ def read_spectra():
             spectrum = Spectrum(str(parts[0][3:]), parts[1], field[1][3:],
                                 gal_long, gal_lat, velocities, opacities,
                                 fluxes)
+            spectrum.temp_brightness = results_array['temp_brightness']
             min_opacity = np.min(spectrum.opacities)
             max_opacity = np.max(spectrum.opacities)
 
@@ -158,7 +162,7 @@ def read_spectra():
 
             opacity_range = max_opacity - min_opacity
             max_s_max_n = (1 - min_opacity) / (max_opacity - 1)
-            continuum_sd = calc_continuum_sd(spectrum, continuum_ranges)
+            continuum_sd, continuum_temp = calc_continuum_sd(spectrum, continuum_ranges)
             rating = calc_rating(opacity_range, max_s_max_n, continuum_sd, em_std)
 
             loc = SkyCoord(gal_long, gal_lat, frame='galactic', unit="deg")
@@ -170,10 +174,12 @@ def read_spectra():
             spectrum.opacity_range = opacity_range
             spectrum.max_s_max_n = max_s_max_n
             spectrum.continuum_sd = continuum_sd
+            spectrum.continuum_temp = continuum_temp
             spectrum.rating = rating
             spectrum.beam_area = beam_area
             spectrum.em_temps = em_temps
             spectrum.em_std = em_std
+            spectrum.sigma_tau = sigma_tau
             spectra.append(spectrum)
 
     return spectra
@@ -436,7 +442,7 @@ def plot_lv_image(x, y, c, filename):
 
     plt.grid(color='antiquewhite')
 
-    plt.savefig(filename)
+    plt.savefig(filename, bbox_inches="tight")
     plt.close()
 
 
@@ -449,7 +455,7 @@ def calc_continuum_sd(spectrum, continuum_ranges):
 
     :param spectrum: The spectrum object being analysed.
     :param continuum_ranges: The defined contionuum ranges
-    :return: The opacity standard deviation.
+    :return: The opacity standard deviation and average temperature
     """
 
     continuum_start_vel, continuum_end_vel = magmo.lookup_continuum_range(
@@ -461,7 +467,8 @@ def calc_continuum_sd(spectrum, continuum_ranges):
         spectrum.velocity < continuum_end_vel)
     bin_end = continuum_range[0][-1]
     sd_cont = np.std(spectrum.opacities[bin_start:bin_end])
-    return sd_cont
+    cont_temp = np.mean(spectrum.temp_brightness)
+    return sd_cont, cont_temp
 
 
 def calc_rating(opacity_range, max_s_max_n, continuum_sd, em_std):
@@ -521,6 +528,7 @@ def output_spectra_catalogue(spectra, isle_day_map):
     rms_opacity = np.zeros(rows)
     opacity_range = np.zeros(rows)
     continuum_sd = np.zeros(rows)
+    continuum_temp = np.zeros(rows)
     max_s_max_n = np.zeros(rows)
     max_em_std = np.zeros(rows)
     rating = np.empty(rows, dtype=object)
@@ -553,6 +561,7 @@ def output_spectra_catalogue(spectra, isle_day_map):
         opacity_range[i] = spectrum.opacity_range
         max_s_max_n[i] = spectrum.max_s_max_n
         continuum_sd[i] = spectrum.continuum_sd
+        continuum_temp[i] = spectrum.continuum_temp
         rating[i] = spectrum.rating
         src_parts = spectrum.src_id.split('-')
         resolved[i] = is_resolved(spectrum.day, spectrum.field_name, src_parts[0], src_parts[1], spectrum.beam_area,
@@ -570,12 +579,12 @@ def output_spectra_catalogue(spectra, isle_day_map):
 
     spectra_table = Table(
         [ids, days, fields, sources, longitudes, latitudes, eq_ras, eq_decs, max_flux, min_opacity,
-         max_opacity, rms_opacity, min_velocity, max_velocity, used,
+         max_opacity, rms_opacity, min_velocity, max_velocity, used, continuum_temp,
          opacity_range, max_s_max_n, continuum_sd, max_em_std, rating, resolved, duplicate,
          filenames, local_paths, local_emission_paths],
         names=['Name', 'Day', 'Field', 'Source', 'Longitude', 'Latitude', 'RA', 'Dec', 'Max_Flux',
                'Min_Opacity', 'Max_Opacity', 'RMS_Opacity', 'Min_Velocity',
-               'Max_Velocity', 'Used', 'Opacity_Range', 'Max_S_Max_N',
+               'Max_Velocity', 'Used', 'Continuum_Temp', 'Opacity_Range', 'Max_S_Max_N',
                'Continuum_SD', 'max_em_std', 'Rating', 'Resolved', 'Duplicate',
                'Filename', 'Local_Path', 'Local_Emission_Path'],
         meta={'ID': 'magmo_spectra',
@@ -776,6 +785,8 @@ def plot_spectra(spectra):
     for rating in 'ABCDEF':
         magmo.ensure_dir_exists("plots/" + rating)
 
+    continuum_ranges = magmo.get_continuum_ranges()
+
     for spectrum in spectra:
         if spectrum.em_temps is None or len(spectrum.em_temps) == 0:
             # skip entries which have no emission data
@@ -785,15 +796,21 @@ def plot_spectra(spectra):
             # Skip duplicates
             continue
 
+        con_start_vel, con_end_vel = magmo.lookup_continuum_range(
+            continuum_ranges, int(spectrum.longitude))
+        print ("longitude of {} gave range of {} - {}".format(int(spectrum.longitude), con_start_vel, con_end_vel))
+
         # Plot line chart of bright_temp vs opacity according in velocity order
-        fig = plt.figure(0, [6, 9])
+        fig = plt.figure(0, [6, 7])
 
         # 1. emission
-        ax = fig.add_subplot(3, 1, 1)
+        ax = fig.add_subplot(2, 1, 1)
         ax.plot(spectrum.velocity, spectrum.em_temps)
         em_max = spectrum.em_temps + spectrum.em_std
         em_min = spectrum.em_temps - spectrum.em_std
         plt.fill_between(spectrum.velocity, em_min, em_max, facecolor='lightgray', color='lightgray')
+        ax.axvline(con_start_vel, color='g', linestyle='dashed')
+        ax.axvline(con_end_vel, color='g', linestyle='dashed')
 
         #ax.axhline(0, color='r')
         #ax.set_xlabel(r'Velocity relative to LSR (km/s)')
@@ -804,19 +821,27 @@ def plot_spectra(spectra):
         plt.setp(ax.get_xticklabels(), visible=False)
 
         # 2. absorption
-        ax2 = fig.add_subplot(3, 1, 2, sharex=ax)
+        ax2 = fig.add_subplot(2, 1, 2, sharex=ax)
         ax2.plot(spectrum.velocity, spectrum.opacities)
-        #ax2.axhline(1, color='r')
+        ax2.axhline(1, color='r')
+
+        if len(spectrum.sigma_tau) > 0:
+            tau_max = 1 + spectrum.sigma_tau
+            tau_min = 1 - spectrum.sigma_tau
+            ax2.fill_between(spectrum.velocity, tau_min, tau_max, facecolor='lightgray', color='lightgray')
+
         ax2.set_xlabel(r'Velocity relative to LSR (km/s)')
         ax2.set_ylabel(r'$e^{(-\tau)}$')
         ax2.grid(True)
+        ax2.axvline(con_start_vel, color='g', linestyle='dashed')
+        ax2.axvline(con_end_vel, color='g', linestyle='dashed')
 
         # 3. scatter
-        ax3 = fig.add_subplot(3, 1, 3)
-        ax3.plot(1-spectrum.opacities, spectrum.em_temps, markersize=2, marker='o')
-        ax3.set_xlabel(r'$1 - e^{(-\tau)}$')
-        ax3.set_ylabel(r'$T_B (K)$')
-        ax3.grid(True)
+        #ax3 = fig.add_subplot(3, 1, 3)
+        #ax3.plot(1-spectrum.opacities, spectrum.em_temps, markersize=2, marker='o')
+        #ax3.set_xlabel(r'$1 - e^{(-\tau)}$')
+        #ax3.set_ylabel(r'$T_B (K)$')
+        #ax3.grid(True)
 
         plt.tight_layout()
         # change axis location of ax5

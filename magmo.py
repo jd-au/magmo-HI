@@ -139,6 +139,8 @@ def lookup_continuum_range(continuum_ranges, longitude):
     :param longitude: The integer longitude to be checked.
     :return: The min and max continuum velocities.
     """
+    if longitude < 0:
+        longitude += 360
     continuum_start_vel = -210
     continuum_end_vel = -150
     for row in continuum_ranges:
