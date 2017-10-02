@@ -320,8 +320,8 @@ def get_integrated_spectrum(image, w, src, velocities, longitude, continuum_rang
     pix = w.wcs_world2pix(src['ra'], src['dec'], 0, 0, 1)
     x_coord = int(round(pix[0])) - 1  # 266
     y_coord = int(round(pix[1])) - 1  # 197
-    print("Translated %.4f, %.4f to %d, %d" % (
-        src['ra'], src['dec'], x_coord, y_coord))
+    #print("Translated %.4f, %.4f to %d, %d" % (
+    #    src['ra'], src['dec'], x_coord, y_coord))
     radius = 2
     y_min = y_coord - radius
     y_max = y_coord + radius
@@ -572,7 +572,7 @@ def point_in_ellipse(origin, point, a, b, pa_rad):
 
     # Calc distance from origin relative to a/b
     dist = math.sqrt((x / a_deg) ** 2 + (y / b_deg) ** 2)
-    print("Point %s is %f from ellipse %f, %f, %f at %s." % (point, dist, a, b, math.degrees(pa_rad), origin))
+    # print("Point %s is %f from ellipse %f, %f, %f at %s." % (point, dist, a, b, math.degrees(pa_rad), origin))
     return dist <= 1.0
 
 
@@ -581,36 +581,82 @@ def point_in_island(point, islands):
     dec = point.icrs.dec.degree
     for island in islands:
         if island.min_ra <= ra <= island.max_ra and island.min_dec <= dec <= island.max_dec:
-            print("Point %s in island %d at %f, %f" % (point, island.isle_id, island.min_ra, island.min_dec))
+            print("  Point %s in island %d at %f, %f" % (point, island.isle_id, island.min_ra, island.min_dec))
             return True
-    print("Point %f, %f not in any of %d islands" % (ra, dec, len(islands)))
+    # print("Point %f, %f not in any of %d islands" % (ra, dec, len(islands)))
     return False
 
 
-def calc_offset_points(longitude, latitude, beam_size, a, b, pa, islands, num_points=6, max_dist=0.108):
+def emission_has_absorption(coord, emission):
+    #ems = sgps.extract_spectra([coord, ], file_list)
+    if emission:
+        spectrum = emission.flux
+        if np.min(spectrum) > -12:
+            return False
+        else:
+            print("  coord l {:.4f} b {:.4f} has absorption {:.2f}".format(coord.galactic.l.value,
+                                                                           coord.galactic.b.value, np.min(spectrum)))
+
+    return True
+
+
+def cache_sgps_spectra(sample_points, file_list):
+    coords = np.array(sample_points)
+    orig_shape = coords.shape
+    coords = coords.flatten()
+    spectra = sgps.extract_spectra(coords, file_list)
+    sample_spectra = np.array(spectra).reshape(orig_shape)
+    return sample_spectra
+
+
+def calc_all_points(origin, num_points, beam_size, max_dist, step_fraction=0.5):
     spacing = 2.0 * math.pi / float(num_points)
-    origin = SkyCoord(longitude, latitude, frame='galactic', unit="deg")
-    pa_rad = math.radians(pa)
-    points = []
+    step_size = beam_size * step_fraction
+    num_steps = int(max_dist / step_size)
+    coord_list = []
+    print ("Steps", num_steps, step_size)
     for i in range(0, num_points):
         angle = spacing * i
-        mult = 0.5
-        inside_component = True
-        while inside_component:
-            if mult*beam_size > max_dist:
-                coord = None
-                break
-            g_l = longitude + math.sin(angle)*beam_size*mult
-            g_b = latitude + math.cos(angle)*beam_size*mult
+        vector = []
+        for step in range(1, num_steps+1):
+            distance = step * step_size
+            g_l = origin.galactic.l.value + math.sin(angle)*distance
+            g_b = origin.galactic.b.value + math.cos(angle)*distance
             coord = SkyCoord(g_l, g_b, frame='galactic', unit="deg")
+            vector.append(coord)
+        coord_list.append(vector)
+    print ("First coord", coord_list[0][0])
+    return coord_list
 
+
+def calc_offset_points(longitude, latitude, beam_size, a, b, pa, islands, file_list, num_points=6, max_dist=0.3611):
+    # spacing = 2.0 * math.pi / float(num_points)
+    origin = SkyCoord(longitude, latitude, frame='galactic', unit="deg")
+    coord = origin
+    pa_rad = math.radians(pa)
+    sample_points = calc_all_points(origin, num_points, beam_size, max_dist)
+    sample_emisison_spectra = cache_sgps_spectra(sample_points, file_list)
+    points = []
+    for i in range(0, num_points):
+        for step in range(len(sample_points[i])):
+            coord = sample_points[i][step]
             inside_component = point_in_ellipse(origin, coord, a, b, pa_rad) or point_in_island(coord, islands)
-            mult += 0.5
+            if inside_component:
+                coord = None
+                continue
+            emission = sample_emisison_spectra[i][step]
+            if not emission_has_absorption(coord, emission):
+                break
+
+            # Not found yet
+            coord = None
+
         if coord is None:
-            print("Point could not be found for angle %f within max dist of %f (mult %f)" % (
-                math.degrees(angle), max_dist, mult))
+            print("Point could not be found for angle %d within max dist of %f (max steps %d)" % (
+                i, max_dist, len(sample_points[i])))
         else:
-            print ("Point at angle %f is %s with mult %f" % (math.degrees(angle), str(coord), mult-0.5))
+            print("Point at angle %d is at l %.4f b %.4f with mult %d" % (
+                i, coord.galactic.l.value, coord.galactic.b.value, step))
             points.append(coord)
 
     return points
@@ -632,7 +678,7 @@ def get_emission_spectra(centre, velocities, file_list, filename_prefix, a, b, p
     #file_list = sgps.get_hi_file_list()
     filename = filename_prefix + '_emission.votable.xml'
     coords = calc_offset_points(centre.galactic.l.value,
-                                centre.galactic.b.value, 0.03611, a, b, pa, islands)
+                                centre.galactic.b.value, 0.03611, a, b, pa, islands, file_list)
     ems = sgps.extract_spectra(coords, file_list)
     print("Found {} emission points from {} coords for point l={}, b={}".format(len(ems), len(coords),
                                                                                 centre.galactic.l.value,

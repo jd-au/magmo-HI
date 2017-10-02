@@ -127,8 +127,8 @@ def extract_spectra(coords, sgps_hi_file_list):
                 pix = w.wcs_world2pix(coord.galactic.l, coord.galactic.b, 0, 0, 1)
                 x_coord = int(round(pix[0])) - 1
                 y_coord = int(round(pix[1])) - 1
-                print("Translated %.4f, %.4f to %d, %d" % (
-                    coord.galactic.l.value, coord.galactic.b.value, x_coord, y_coord))
+                #print("Translated %.4f, %.4f to %d, %d" % (
+                #    coord.galactic.l.value, coord.galactic.b.value, x_coord, y_coord))
 
                 # Extract slice
                 slice = image[0, :, y_coord, x_coord]
@@ -145,6 +145,15 @@ def extract_spectra(coords, sgps_hi_file_list):
         file_idx += 1
 
     return results
+
+
+def extract_image(coords, sgps_hi_file_list):
+    # find the file which covers the coords
+    # TODO: Which plane? total, sample where there is absorption in MAGMO?
+    # Extract a cutout from the image
+    # Plot the cutout
+    # Plot a rectangle of the coordinates
+    return
 
 
 def set_sgps_location(sgps_folder):
