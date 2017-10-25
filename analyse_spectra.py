@@ -137,6 +137,7 @@ def read_spectra():
             em_std = np.zeros(len(results_array))
             sigma_tau = np.zeros(len(results_array))
             i = 0
+            has_emission = False
             for row in results_array:
                 opacity = row['opacity']
                 velocities[i] = row['velocity'] / 1000.0
@@ -146,6 +147,7 @@ def read_spectra():
                     sigma_tau[i] = row['sigma_tau']
                 if 'em_mean' in results_array.dtype.names:
                     em_temps[i] = row['em_mean']
+                    has_emission = True
                 if 'em_std' in results_array.dtype.names:
                     em_std[i] = row['em_std']
                 i += 1
@@ -180,6 +182,7 @@ def read_spectra():
             spectrum.em_temps = em_temps
             spectrum.em_std = em_std
             spectrum.sigma_tau = sigma_tau
+            spectrum.has_emission = has_emission
             spectra.append(spectrum)
 
     return spectra
@@ -429,7 +432,8 @@ def plot_lv_image(x, y, c, filename):
                                 v_max * 1000)
 
     # Add an outline of the emission from GASS III
-    plt.contour(np.log10(np.flipud(gass_subset)), 1, cmap='Pastel2')
+    contour_set = plt.contour(np.log10(np.flipud(gass_subset)), 1, cmap='Pastel2')
+    #plt.clabel(contour_set)
 
     # Set the axis ticks and scales
     x_step = int(20 * (gass_subset.shape[1] / (l_max - l_min)))
@@ -504,6 +508,15 @@ def is_resolved(day, field_name, island_id, source_id, beam_area, islands):
             return isle['area'] > isle['beam_area']
 
 
+def set_field_metadata(field, ucd, unit, description):
+    if ucd:
+        field.ucd = ucd
+    if unit:
+        field.unit = unit
+    if description:
+        field.description = description
+
+
 def output_spectra_catalogue(spectra, isle_day_map):
     """
     Output the list of spectrum stats to a VOTable file magmo-spectra.vot
@@ -531,10 +544,13 @@ def output_spectra_catalogue(spectra, isle_day_map):
     continuum_temp = np.zeros(rows)
     max_s_max_n = np.zeros(rows)
     max_em_std = np.zeros(rows)
+    max_emission = np.zeros(rows)
+    min_emission = np.zeros(rows)
     rating = np.empty(rows, dtype=object)
     used = np.empty(rows, dtype=bool)
     resolved = np.empty(rows, dtype=bool)
     duplicate = np.empty(rows, dtype=bool)
+    has_emission = np.empty(rows, dtype=bool)
     filenames = np.empty(rows, dtype=object)
     local_paths = np.empty(rows, dtype=object)
     local_emission_paths = np.empty(rows, dtype=object)
@@ -557,6 +573,9 @@ def output_spectra_catalogue(spectra, isle_day_map):
         min_velocity[i] = np.min(spectrum.velocity)
         max_velocity[i] = np.max(spectrum.velocity)
         max_em_std[i] = np.max(spectrum.em_std)
+        if spectrum.has_emission:
+            max_emission[i] = np.max(spectrum.em_temps)
+            min_emission[i] = np.min(spectrum.em_temps)
 
         opacity_range[i] = spectrum.opacity_range
         max_s_max_n[i] = spectrum.max_s_max_n
@@ -568,9 +587,9 @@ def output_spectra_catalogue(spectra, isle_day_map):
                                   isle_day_map[spectrum.day] if spectrum.day in isle_day_map else None)
 
         duplicate[i] = spectrum.duplicate
+        has_emission[i] = spectrum.has_emission
         used[i] = not spectrum.low_sn
-        prefix = 'day' + spectrum.day + '/' + spectrum.field_name + \
-                       "_src" + spectrum.src_id
+        prefix = 'day' + spectrum.day + '/' + spectrum.field_name + "_src" + spectrum.src_id
         filenames[i] =  prefix + "_plot.png"
         em_filename = prefix + "_emission.png"
         local_paths[i] = base_path + '/' + filenames[i]
@@ -579,17 +598,23 @@ def output_spectra_catalogue(spectra, isle_day_map):
 
     spectra_table = Table(
         [ids, days, fields, sources, longitudes, latitudes, eq_ras, eq_decs, max_flux, min_opacity,
-         max_opacity, rms_opacity, min_velocity, max_velocity, used, continuum_temp,
-         opacity_range, max_s_max_n, continuum_sd, max_em_std, rating, resolved, duplicate,
+         max_opacity, rms_opacity, min_emission, max_emission, min_velocity, max_velocity, used, continuum_temp,
+         opacity_range, max_s_max_n, continuum_sd, max_em_std, rating, resolved, duplicate, has_emission,
          filenames, local_paths, local_emission_paths],
         names=['Name', 'Day', 'Field', 'Source', 'Longitude', 'Latitude', 'RA', 'Dec', 'Max_Flux',
-               'Min_Opacity', 'Max_Opacity', 'RMS_Opacity', 'Min_Velocity',
+               'Min_Opacity', 'Max_Opacity', 'RMS_Opacity', 'Min_Emission', 'Max_Emission', 'Min_Velocity',
                'Max_Velocity', 'Used', 'Continuum_Temp', 'Opacity_Range', 'Max_S_Max_N',
-               'Continuum_SD', 'max_em_std', 'Rating', 'Resolved', 'Duplicate',
+               'Continuum_SD', 'max_em_std', 'Rating', 'Resolved', 'Duplicate', 'Has_Emission',
                'Filename', 'Local_Path', 'Local_Emission_Path'],
         meta={'ID': 'magmo_spectra',
               'name': 'MAGMO Spectra ' + str(datetime.date.today())})
     votable = from_table(spectra_table)
+    table = votable.get_first_table()
+    set_field_metadata(table.get_field_by_id('Min_Emission'), 'stat.min', 'K',
+                       'Minimum average emission')
+    set_field_metadata(table.get_field_by_id('Max_Emission'), 'stat.max', 'K',
+                       'Maximum average emission')
+
     filename = "magmo-spectra.vot"
     writeto(votable, filename)
     print("Wrote out", i, "spectra to", filename)
@@ -890,7 +915,8 @@ def filter_duplicate_sources(spectra, field_map):
             #                                                                          match2.rating,
             #                                                                          match1.continuum_sd,
             #                                                                          match2.continuum_sd))
-            if match1.rating > match2.rating or match1.continuum_sd > match2.continuum_sd:
+            if match1.rating > match2.rating or (not match1.has_emission and match2.has_emission) or \
+                            match1.continuum_sd > match2.continuum_sd:
                 match1.duplicate = True
                 print("Flagging {} rating {} as duplicate. Dist {:.2f}".format(match1.name, match1.rating,
                                                                            dist_2d[i].to(u.arcsec)))

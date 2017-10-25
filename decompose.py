@@ -196,7 +196,7 @@ def decompose(spectra, out_filename, alpha1, alpha2, snr_thresh, data_filename):
           (len(spectra), time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end)), (end - end_read)))
 
 
-def output_component_catalogue(spectra, data, data_decomposed):
+def output_component_catalogue(spectra, data, data_decomposed, folder):
     names = []
     comp_names = []
     days = []
@@ -211,7 +211,6 @@ def output_component_catalogue(spectra, data, data_decomposed):
     amps_fit_errs = []
     fwhms_fit_errs = []
     means_fit_errs = []
-
 
     num_no_comps = {}
 
@@ -252,6 +251,7 @@ def output_component_catalogue(spectra, data, data_decomposed):
         else:
             rating = spectrum['Rating']
             num_no_comps[rating] = num_no_comps.get(rating, 0) + 1
+            print ("Unable to find components for ")
 
     temp_table = Table(
         [comp_names, names, days, field_names, sources, longitudes, latitudes, amps, fwhms, means, best_fit_rchi2s,
@@ -262,6 +262,8 @@ def output_component_catalogue(spectra, data, data_decomposed):
               'name': 'MAGMO Components ' + str(datetime.date.today())})
     votable = from_table(temp_table)
     filename = "magmo-components.vot"
+    writeto(votable, filename)
+    filename = folder + "/magmo-components.vot"
     writeto(votable, filename)
 
     total_nc = 0
@@ -351,19 +353,38 @@ def plot_single_spectrum(ax, velo, opacity, fit_amps, fit_fwhms, fit_means, name
     return residual
 
 
+def find_bounds(velo, fit_fwhms, fit_means):
+    buff = 25 # km/s
+
+    if len(fit_fwhms) == 0:
+        return 0, len(velo)-1
+
+    means = np.array(fit_means)
+    fwhms = np.array(fit_fwhms)
+    lowest_vals = means - fwhms
+    highest_vals = means + fwhms
+    low_velo = np.min(lowest_vals) - buff
+    high_velo = np.max(highest_vals) + buff
+    low_idx = (np.abs(velo - low_velo)).argmin()
+    high_idx = (np.abs(velo - high_velo)).argmin()
+    return low_idx, high_idx
+
+
 def plot_spectrum(velo, opacity, fit_amps, fit_fwhms, fit_means, name, filename, formats):
     fig = plt.figure(figsize=(8, 6))
     gs = gridspec.GridSpec(2, 1, height_ratios=[3, 1])
     ax = fig.add_subplot(gs[0])
 
     y = convert_from_ratio(opacity)
-    residual = plot_single_spectrum(ax, velo, y, fit_amps, fit_fwhms, fit_means, name)
+    min_bound, max_bound = find_bounds(velo, fit_fwhms, fit_means)
+    residual = plot_single_spectrum(ax, velo[min_bound:max_bound], y[min_bound:max_bound],
+                                    fit_amps, fit_fwhms, fit_means, name)
     residual_rms = np.sqrt(np.mean(np.square(residual)))
     ax.set_ylabel('$e^{-\\tau}$')
 
     # Residual plot
     ax = fig.add_subplot(gs[1])
-    ax.plot(velo, residual, 'or', markerfacecolor='None', markersize=2, markeredgecolor='blue')
+    ax.plot(velo[min_bound:max_bound], residual, 'or', markerfacecolor='None', markersize=2, markeredgecolor='blue')
     ax.grid()
 
     plt.xlabel('LSR Velocity (km/s) n=%d rms=%.4f' % (len(fit_amps), residual_rms))
@@ -483,7 +504,7 @@ def output_decomposition(spectra, out_filename, folder, data_filename, alpha1, a
     plt.savefig(folder + "/magmo-decomp.pdf")
     plt.close()
 
-    output_component_catalogue(spectra, data, data_decomposed)
+    output_component_catalogue(spectra, data, data_decomposed, folder)
     output_decomposition_catalogue(folder, spectra, data, data_decomposed, alpha1, alpha2)
     plot_spectra(spectra, data, data_decomposed, alpha1, alpha2, folder=folder)
 
