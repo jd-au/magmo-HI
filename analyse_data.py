@@ -629,14 +629,48 @@ def calc_all_points(origin, num_points, beam_size, max_dist, step_fraction=0.5):
     return coord_list
 
 
-def calc_offset_points(longitude, latitude, beam_size, a, b, pa, islands, file_list, num_points=6, max_dist=0.3611):
+def exclude_outliers(points, spectra, exclusion_threshold=4):
+    """
+    We use a modified z score to filter outliers. For each velocity step we calculate the z score for each
+    spectrum and then exclude each spectrum which has too many points marked as outliers.
+    :param points: The coordinates of each sample point.
+    :param spectra: An array of the emission spectra at each sample point. Must be in the same order as points.
+    :param exclusion_threshold: The number of outlier points required to exclude a sample.
+    :return: A modified points array with outliers excluded.
+    """
+
+    # Calculate the medians of each velocity step
+    data = np.asarray(spectra)
+    medians = np.median(data, axis=0)
+
+    # Calculate the absolute distance from median of each data point
+    dist = np.abs(data - medians)
+
+    # Calculate the MAD for each velocity step
+    mad = np.maximum(np.median(dist, axis=0), 0.00000001)
+
+    # Clip the really small distances to avoid noise in non HI regions being seen as amplifiers
+    dist[dist < 2] = 0
+
+    # Count the number of outliers for each spectrum
+    z_score = (0.6745 * dist) / mad
+    valid = np.sum(z_score > 3.5, axis=1) <= exclusion_threshold
+    print("z_score %s valid %s" % (z_score, valid))
+
+    # Exclude any that break the threshold
+    included_points = np.asarray(points)
+    included_points = included_points[valid]
+    return included_points
+
+
+def calc_offset_points(longitude, latitude, beam_size, a, b, pa, islands, file_list, num_points=18, max_dist=0.3611):
     # spacing = 2.0 * math.pi / float(num_points)
     origin = SkyCoord(longitude, latitude, frame='galactic', unit="deg")
-    coord = origin
     pa_rad = math.radians(pa)
     sample_points = calc_all_points(origin, num_points, beam_size, max_dist)
-    sample_emisison_spectra = cache_sgps_spectra(sample_points, file_list)
+    sample_emission_spectra = cache_sgps_spectra(sample_points, file_list)
     points = []
+    spectra = []
     for i in range(0, num_points):
         for step in range(len(sample_points[i])):
             coord = sample_points[i][step]
@@ -644,7 +678,7 @@ def calc_offset_points(longitude, latitude, beam_size, a, b, pa, islands, file_l
             if inside_component:
                 coord = None
                 continue
-            emission = sample_emisison_spectra[i][step]
+            emission = sample_emission_spectra[i][step]
             if not emission_has_absorption(coord, emission):
                 break
 
@@ -658,8 +692,12 @@ def calc_offset_points(longitude, latitude, beam_size, a, b, pa, islands, file_l
             print("Point at angle %d is at l %.4f b %.4f with mult %d" % (
                 i, coord.galactic.l.value, coord.galactic.b.value, step))
             points.append(coord)
+            spectra.append(emission.flux)
 
-    return points
+    included_points = exclude_outliers(points, spectra)
+    print("For l %.4f b %.4f, excluded %d points that had outliers, leaving %d emission spectra" % (
+        origin.galactic.l.value, origin.galactic.b.value, len(points) - len(included_points), len(included_points)))
+    return included_points
 
 
 def get_emission_spectra(centre, velocities, file_list, filename_prefix, a, b, pa, islands):
