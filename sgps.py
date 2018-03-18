@@ -15,8 +15,8 @@ from astropy.io import fits
 from astropy.wcs import WCS
 
 
-_SGPS_FOLDER = "/priv/myrtle1/gaskap/SGPS/"
-_SGPS_HI_PATTERN = '*hi.fits.gz'
+_SGPS_FOLDER = "/priv/myrtle1/gaskap/james/sgps"
+_SGPS_HI_PATTERN = '*hi.fits*'
 
 
 class Spectrum(object):
@@ -54,7 +54,7 @@ def get_hi_file_list():
         del header
         sgps_fits.close()
         min_long = long_refval - (long_refpix-1) * long_delta
-        max_long = long_refval + long_naxis * long_delta
+        max_long = long_refval + (long_naxis-long_refpix) * long_delta
         if long_delta < 0:
             temp = max_long
             max_long = min_long
@@ -117,7 +117,10 @@ def extract_spectra(coords, sgps_hi_file_list):
         header = hdulist[0].header
         w = WCS(header)
         index = np.arange(header['NAXIS3'])
-        velocities = w.wcs_pix2world(0, 0, index[:], 0, 0)[2]
+        if header['NAXIS'] == 3:
+            velocities = w.wcs_pix2world(0, 0, index[:], 0)[2]
+        else:
+            velocities = w.wcs_pix2world(0, 0, index[:], 0, 0)[2]
 
         # For each target coord in this file
         for i in range(0,len(file_indexes)):
@@ -131,7 +134,17 @@ def extract_spectra(coords, sgps_hi_file_list):
                 #    coord.galactic.l.value, coord.galactic.b.value, x_coord, y_coord))
 
                 # Extract slice
-                slice = image[0, :, y_coord, x_coord]
+                try:
+                    if header['NAXIS'] == 3:
+                        slice = image[:, y_coord, x_coord]
+                    else:
+                        slice = image[0, :, y_coord, x_coord]
+                except IndexError as exception:
+                    logging.exception("Unable to extract an sgps spectrum "
+                                      "from {} at position l {} b {} as it was out of bounds".format(fits_filename,
+                                                                                                     coord.galactic.l,
+                                                                                                     coord.galactic.b))
+                    raise
 
                 # Create spectra object
                 spectrum = Spectrum(coord, velocities, slice)
