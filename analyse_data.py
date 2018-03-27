@@ -639,6 +639,9 @@ def exclude_outliers(points, spectra, exclusion_threshold=4):
     :return: A modified points array with outliers excluded.
     """
 
+    if len(points) == 0:
+        return points
+
     # Calculate the medians of each velocity step
     data = np.asarray(spectra)
     medians = np.median(data, axis=0)

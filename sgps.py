@@ -79,7 +79,9 @@ def get_hi_file_at_long(longitude, sgps_hi_file_list, edge_size=0.5):
     """
     actual_long = longitude if longitude >= 0 else 360.0 + longitude
     for entry in sgps_hi_file_list:
-        if entry['min_long']+edge_size < actual_long < entry['max_long']-edge_size:
+        if entry['min_long']+edge_size < actual_long < entry['max_long']-edge_size-1:
+            print ("Found file {} range {} to {} for long {}".format(entry['file_name'], entry['min_long'],
+                  entry['max_long'], actual_long))
             return entry['file_name']
 
     # Fallback to no buffer if there are no files with this value away
@@ -108,10 +110,16 @@ def extract_spectra(coords, sgps_hi_file_list):
             if not (hi_file in files):
                 files.append(hi_file)
             file_indexes.append(files.index(hi_file))
+        else:
+            file_indexes.append(-1)
 
-    results = []
+    if not file_indexes:
+        return []
+
+    results = [None] * len(file_indexes)
     file_idx = 0
     for fits_filename in files:
+        # print ("Using", fits_filename, "for", coord)
         hdulist = fits.open(fits_filename)
         image = hdulist[0].data
         header = hdulist[0].header
@@ -127,11 +135,21 @@ def extract_spectra(coords, sgps_hi_file_list):
             if file_idx == file_indexes[i]:
                 coord = coords[i]
                 # convert desired coord to pixel coords
+                if header['NAXIS'] == 3:
+                    pix = w.wcs_world2pix(coord.galactic.l, coord.galactic.b, 0, 1)
+                else:
                 pix = w.wcs_world2pix(coord.galactic.l, coord.galactic.b, 0, 0, 1)
                 x_coord = int(round(pix[0])) - 1
                 y_coord = int(round(pix[1])) - 1
                 #print("Translated %.4f, %.4f to %d, %d" % (
                 #    coord.galactic.l.value, coord.galactic.b.value, x_coord, y_coord))
+
+                # Check latitude range
+                if y_coord < 0 or y_coord >= header['NAXIS2']:
+                    # No data for the latitude range of the target
+                    print("Skipping position l {} b {} as it is outside latitude range of {}".format(
+                        coord.galactic.l, coord.galactic.b, fits_filename))
+                    continue
 
                 # Extract slice
                 try:
@@ -150,7 +168,7 @@ def extract_spectra(coords, sgps_hi_file_list):
                 spectrum = Spectrum(coord, velocities, slice)
 
                 # Add to result list
-                results.append(spectrum)
+                results[i] = spectrum
 
         del image
         del header
