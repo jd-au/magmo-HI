@@ -138,7 +138,7 @@ def extract_spectra(coords, sgps_hi_file_list):
                 if header['NAXIS'] == 3:
                     pix = w.wcs_world2pix(coord.galactic.l, coord.galactic.b, 0, 1)
                 else:
-                pix = w.wcs_world2pix(coord.galactic.l, coord.galactic.b, 0, 0, 1)
+                    pix = w.wcs_world2pix(coord.galactic.l, coord.galactic.b, 0, 0, 1)
                 x_coord = int(round(pix[0])) - 1
                 y_coord = int(round(pix[1])) - 1
                 #print("Translated %.4f, %.4f to %d, %d" % (
